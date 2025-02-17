@@ -130,19 +130,19 @@ class TestTrainer:
         # Test invalid memory utilization
         with pytest.raises(ValueError) as exc_info:
             ProjectConfig(
-                model=sample_config.model.model_copy(update={"gpu_memory_utilization": 2.0}),
+                model=sample_config.model.copy(update={"gpu_memory_utilization": 2.0}),
                 training=sample_config.training,
                 data=sample_config.data,
                 seed=sample_config.seed,
                 device=sample_config.device
             )
         error_message = str(exc_info.value)
-        assert 'GPU memory utilization must be between 0 and 1' in error_message
+        assert 'gpu_memory_utilization must be between 0 and 1' in error_message
         
         # Test invalid max_seq_length
         with pytest.raises(ValueError) as exc_info:
             ProjectConfig(
-                model=sample_config.model.model_copy(update={"max_seq_length": -1}),
+                model=sample_config.model.copy(update={"max_seq_length": -1}),
                 training=sample_config.training,
                 data=sample_config.data,
                 seed=sample_config.seed,
@@ -155,7 +155,7 @@ class TestTrainer:
         with pytest.raises(ValueError) as exc_info:
             ProjectConfig(
                 model=sample_config.model,
-                training=sample_config.training.model_copy(update={"per_device_train_batch_size": 0}),
+                training=sample_config.training.copy(update={"per_device_train_batch_size": 0}),
                 data=sample_config.data,
                 seed=sample_config.seed,
                 device=sample_config.device
