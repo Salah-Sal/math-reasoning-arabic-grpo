@@ -5,6 +5,7 @@ from src.training.trainer import Trainer
 from src.data.dataset import ArabicMathDataset
 from src.infrastructure.config import ProjectConfig, ModelConfig, TrainingConfig
 from src.infrastructure.logging import get_logger
+import pydantic_core
 
 logger = get_logger(__name__)
 
@@ -70,10 +71,12 @@ class TestTrainerInitialization:
     @pytest.mark.gpu
     def test_config_validation(self, base_config):
         """Test configuration validation"""
-        # Test invalid GPU memory utilization
         invalid_config = base_config.model_dump()
         invalid_config['model']['gpu_memory_utilization'] = 2.0
-        with pytest.raises(ValueError, match="GPU memory utilization must be between 0 and 1"):
+        with pytest.raises(
+            pydantic_core.ValidationError,
+            match="Input should be less than or equal to 1"
+        ):
             Trainer(config=ProjectConfig(**invalid_config), poc_mode=True)
 
 class TestTrainerModelLoading:

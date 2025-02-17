@@ -12,6 +12,19 @@ logger = get_logger(__name__)
 class Trainer:
     """Trainer class for the Arabic Math Reasoning model."""
     
+    def _adjust_config_for_gpu(self, config: ProjectConfig) -> ProjectConfig:
+        """Create a new config with adjusted settings for GPU constraints"""
+        if torch.cuda.get_device_properties(0).total_memory < 10 * 1024**3:
+            config_dict = config.model_dump()
+            config_dict['model']['max_seq_length'] = 256
+            config_dict['model']['gpu_memory_utilization'] = 0.6
+            config_dict['training']['per_device_train_batch_size'] = 1
+            config_dict['training']['gradient_accumulation_steps'] = 1
+            config_dict['training']['num_generations'] = 4
+            logger.info("Adjusted settings for 8GB GPU")
+            return ProjectConfig(**config_dict)
+        return config
+
     def __init__(
         self,
         config: ProjectConfig,
@@ -31,10 +44,10 @@ class Trainer:
         # Force garbage collection and cache clearing
         torch.cuda.empty_cache()
         
-        # Validate configuration
-        self._validate_config(config)
+        # Create adjusted config instead of modifying existing one
+        self.config = self._adjust_config_for_gpu(config)
+        self._validate_config(self.config)
         
-        self.config = config
         self.poc_mode = poc_mode
         self.output_dir = Path(output_dir) if output_dir else Path("outputs")
         self.output_dir.mkdir(exist_ok=True)
@@ -66,15 +79,6 @@ class Trainer:
             
             logger.info(f"GPU Memory: {free_gb:.2f}GB free of {total_gb:.2f}GB total")
             
-            # Adjust settings for 8GB GPU
-            if total_gb < 10:
-                self.config.model.max_seq_length = 256
-                self.config.model.gpu_memory_utilization = 0.6
-                self.config.training.per_device_train_batch_size = 1
-                self.config.training.gradient_accumulation_steps = 1
-                self.config.training.num_generations = 4
-                logger.info("Adjusted settings for 8GB GPU")
-
             logger.info(f"Loading model: {self.config.model.model_name}")
             self.model, self.tokenizer = FastLanguageModel.from_pretrained(
                 model_name=self.config.model.model_name,
