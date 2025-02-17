@@ -9,12 +9,12 @@ class ModelConfig(BaseModel):
         default="Qwen/Qwen2.5-1.5B-Instruct",
         description="Name of the base model to use"
     )
-    max_seq_length: int = Field(default=384, description="Maximum sequence length")
+    max_seq_length: int = Field(default=256, description="Maximum sequence length")
     load_in_4bit: bool = Field(default=True, description="Whether to load in 4-bit quantization")
-    fast_inference: bool = Field(default=False, description="Enable fast inference mode")
-    max_lora_rank: int = Field(default=16, description="Maximum LoRA rank")
+    fast_inference: bool = Field(default=True, description="Enable fast inference mode")
+    max_lora_rank: int = Field(default=8, description="Maximum LoRA rank")
     gpu_memory_utilization: float = Field(
-        default=0.7,
+        default=0.6,
         description="GPU memory utilization target",
         ge=0.0,
         le=1.0
@@ -26,8 +26,8 @@ class ModelConfig(BaseModel):
 class TrainingConfig(BaseModel):
     """Configuration for training parameters"""
     learning_rate: float = Field(default=5e-6, description="Learning rate for training")
-    per_device_train_batch_size: int = Field(default=8, description="Batch size per device")
-    gradient_accumulation_steps: int = Field(default=8, description="Number of gradient accumulation steps")
+    per_device_train_batch_size: int = Field(default=4, description="Batch size per device")
+    gradient_accumulation_steps: int = Field(default=4, description="Number of gradient accumulation steps")
     max_prompt_length: int = Field(default=256, description="Maximum prompt length")
     max_completion_length: int = Field(default=128, description="Maximum completion length")
     logging_steps: int = Field(default=10, description="Number of steps between logging")

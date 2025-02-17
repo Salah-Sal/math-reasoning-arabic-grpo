@@ -4,6 +4,7 @@ from src.training.trainer import Trainer
 from src.data.dataset import ArabicMathDataset
 from src.infrastructure.config import ProjectConfig
 from src.infrastructure.logging import get_logger
+import torch
 
 logger = get_logger(__name__)
 
@@ -47,14 +48,50 @@ def sample_dataset(tmp_path):
     
     return ArabicMathDataset(data_dir=data_dir)
 
-def test_trainer_initialization(sample_config, sample_dataset):
-    """Test basic trainer initialization"""
-    trainer = Trainer(config=sample_config, poc_mode=True)
-    assert trainer.poc_mode == True
-    assert trainer.model is not None
-    assert trainer.tokenizer is not None
-
-def test_poc_dataset_size(sample_config, sample_dataset):
-    """Test that POC mode uses a smaller dataset"""
-    trainer = Trainer(config=sample_config, poc_mode=True)
-    assert len(trainer.prepare_dataset(sample_dataset)) <= 100  # POC should limit dataset size 
+@pytest.mark.skipif(
+    torch.cuda.get_device_properties(0).total_memory < 10 * 1024**3,
+    reason="Test requires GPU with at least 10GB VRAM"
+)
+class TestTrainer:
+    """Test suite for Trainer class"""
+    
+    def test_initialization(self, sample_config, sample_dataset):
+        """Test basic trainer initialization"""
+        trainer = Trainer(config=sample_config, poc_mode=True)
+        assert trainer.poc_mode == True
+        assert trainer.model is not None
+        assert trainer.tokenizer is not None
+    
+    def test_memory_management(self, sample_config):
+        """Test memory clearing functionality"""
+        initial_memory = torch.cuda.memory_allocated()
+        trainer = Trainer(config=sample_config, poc_mode=True)
+        del trainer
+        torch.cuda.empty_cache()
+        final_memory = torch.cuda.memory_allocated()
+        assert final_memory <= initial_memory
+    
+    def test_dataset_preparation(self, sample_config, sample_dataset):
+        """Test dataset preparation in POC mode"""
+        trainer = Trainer(config=sample_config, poc_mode=True)
+        prepared_dataset = trainer.prepare_dataset(sample_dataset)
+        assert len(prepared_dataset) <= 100  # POC size limit
+        
+        # Test full mode
+        trainer = Trainer(config=sample_config, poc_mode=False)
+        full_dataset = trainer.prepare_dataset(sample_dataset)
+        assert len(full_dataset) == len(sample_dataset)
+    
+    def test_config_validation(self, sample_config):
+        """Test configuration validation"""
+        # Test invalid memory utilization
+        invalid_config = sample_config.model_dump()
+        invalid_config['model']['gpu_memory_utilization'] = 2.0
+        with pytest.raises(ValueError):
+            Trainer(config=ProjectConfig(**invalid_config), poc_mode=True)
+    
+    def test_memory_adjustment(self, sample_config):
+        """Test memory utilization adjustment for small GPUs"""
+        trainer = Trainer(config=sample_config, poc_mode=True)
+        if torch.cuda.get_device_properties(0).total_memory < 10 * 1024**3:
+            assert trainer.config.model.gpu_memory_utilization <= 0.8 
