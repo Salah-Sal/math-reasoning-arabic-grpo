@@ -5,26 +5,23 @@ from src.infrastructure.logging import get_logger
 logger = get_logger(__name__)
 
 def clear_memory():
-    """Clear GPU memory and cache.
-    
-    This function:
-    1. Runs garbage collection
-    2. Empties CUDA cache
-    3. Resets peak memory stats
-    """
+    """Clear GPU memory and garbage collect."""
     try:
-        # Run garbage collection
+        # Force Python garbage collection
         gc.collect()
         
-        # Clear CUDA cache
+        # Clear CUDA cache if available
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats()
             
-            # Force garbage collection
+            # Force garbage collection of CUDA tensors
             for obj in gc.get_objects():
-                if torch.is_tensor(obj):
-                    del obj
+                try:
+                    if torch.is_tensor(obj):
+                        del obj
+                except:
+                    pass
             gc.collect()
             
             # Log memory status
