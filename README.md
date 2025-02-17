@@ -113,3 +113,92 @@ def test_feature_behavior(feature_fixture):
 
 For more detailed information about testing specific components, refer to the documentation in each test module.
 
+## Logging System
+
+### Overview
+The project implements a hierarchical logging system that provides both console and file-based logging with different verbosity levels.
+
+### Log Configuration
+```yaml
+# configs/logging_config.yaml
+default:
+  formatters:
+    standard:    # For console output
+      format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    detailed:    # For file output
+      format: '%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
+```
+
+### Log Levels
+- DEBUG: Detailed debugging information
+- INFO: General operational events
+- WARNING: Warning messages for non-critical issues
+- ERROR: Error events that might still allow the application to continue
+- CRITICAL: Critical events that may lead to termination
+
+### Using the Logger
+```python
+from src.infrastructure.logging import get_logger
+
+# Create a logger for your module
+logger = get_logger("your_module_name")
+
+# Example usage
+logger.debug("Detailed debug information")
+logger.info("General information")
+logger.warning("Warning message")
+logger.error("Error message")
+logger.critical("Critical error")
+```
+
+### Log Files
+- Location: `logs/training.log`
+- Rotation: 10MB file size with 5 backup files
+- Format: Detailed format including timestamp, module, level, file location
+
+### Console Output
+- Shows INFO level and above
+- Simplified format for better readability
+
+### Adding Logging to New Components
+When contributing new features:
+1. Import the logger:
+   ```python
+   from src.infrastructure.logging import get_logger
+   ```
+
+2. Create a module-specific logger:
+   ```python
+   logger = get_logger(__name__)  # Uses the module name
+   ```
+
+3. Use appropriate log levels:
+   ```python
+   # Debug: Detailed information for debugging
+   logger.debug("Processing item %s with parameters %s", item_id, params)
+   
+   # Info: Confirmation that things are working as expected
+   logger.info("Training epoch %d completed", epoch)
+   
+   # Warning: Indication that something unexpected happened
+   logger.warning("Memory usage above 80%%, consider reducing batch size")
+   
+   # Error: The software has not been able to perform some function
+   logger.error("Failed to load model: %s", str(error))
+   ```
+
+### Customizing Logging
+To modify logging behavior:
+1. Edit `configs/logging_config.yaml`
+2. Adjust log levels, formats, or handlers
+3. Changes take effect after restarting the application
+
+### Best Practices
+- Use appropriate log levels
+- Include relevant context in log messages
+- Add structured data when possible
+- Avoid logging sensitive information
+- Use format strings instead of concatenation
+
+For more detailed information about logging specific components, refer to the documentation in each module.
+
