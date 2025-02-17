@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List
 from pathlib import Path
 
@@ -19,6 +19,8 @@ class ModelConfig(BaseModel):
         ge=0.0,
         le=1.0
     )
+    
+    model_config = ConfigDict(frozen=True)  # Make the config immutable
 
 
 class TrainingConfig(BaseModel):
@@ -30,6 +32,8 @@ class TrainingConfig(BaseModel):
     max_completion_length: int = Field(default=128, description="Maximum completion length")
     logging_steps: int = Field(default=10, description="Number of steps between logging")
     save_steps: int = Field(default=500, description="Number of steps between model saves")
+    
+    model_config = ConfigDict(frozen=True)
 
 
 class DataConfig(BaseModel):
@@ -46,6 +50,8 @@ class DataConfig(BaseModel):
         default=None,
         description="Directory for caching processed data"
     )
+    
+    model_config = ConfigDict(frozen=True)
 
 
 class ProjectConfig(BaseModel):
@@ -56,8 +62,7 @@ class ProjectConfig(BaseModel):
     seed: int = Field(default=3407, description="Random seed for reproducibility")
     device: str = Field(default="cuda", description="Device to use for training")
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(frozen=True)
 
     @classmethod
     def load_from_yaml(cls, config_path: Path) -> "ProjectConfig":
@@ -66,6 +71,17 @@ class ProjectConfig(BaseModel):
             import yaml
             with open(config_path, 'r') as f:
                 config_dict = yaml.safe_load(f)
+                
+            # Convert string paths to Path objects
+            if 'data' in config_dict:
+                data_config = config_dict['data']
+                if 'data_dir' in data_config:
+                    data_config['data_dir'] = Path(data_config['data_dir'])
+                if 'output_dir' in data_config:
+                    data_config['output_dir'] = Path(data_config['output_dir'])
+                if 'cache_dir' in data_config and data_config['cache_dir']:
+                    data_config['cache_dir'] = Path(data_config['cache_dir'])
+                    
             return cls(**config_dict)
         except Exception as e:
             raise ValueError(f"Error loading configuration from {config_path}: {str(e)}")
@@ -74,7 +90,19 @@ class ProjectConfig(BaseModel):
         """Save configuration to a YAML file"""
         try:
             import yaml
+            
+            # Convert to dict and handle Path objects
+            config_dict = self.model_dump()
+            if 'data' in config_dict:
+                data_config = config_dict['data']
+                if 'data_dir' in data_config:
+                    data_config['data_dir'] = str(data_config['data_dir'])
+                if 'output_dir' in data_config:
+                    data_config['output_dir'] = str(data_config['output_dir'])
+                if 'cache_dir' in data_config and data_config['cache_dir']:
+                    data_config['cache_dir'] = str(data_config['cache_dir'])
+            
             with open(config_path, 'w') as f:
-                yaml.dump(self.dict(), f)
+                yaml.dump(config_dict, f)
         except Exception as e:
             raise ValueError(f"Error saving configuration to {config_path}: {str(e)}") 
