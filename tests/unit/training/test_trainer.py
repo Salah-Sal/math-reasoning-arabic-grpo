@@ -62,58 +62,87 @@ class TestTrainer:
         total_gb = total_memory / 1024**3
         
         if total_gb < 10:
-            # Create new config instead of modifying
             config_dict = sample_config.model_dump()
-            config_dict['model']['max_seq_length'] = 256
-            config_dict['model']['gpu_memory_utilization'] = 0.6
-            config_dict['training']['per_device_train_batch_size'] = 4
-            config_dict['training']['gradient_accumulation_steps'] = 4
+            config_dict['model'].update({
+                'max_seq_length': 256,
+                'gpu_memory_utilization': 0.6,
+            })
+            config_dict['training'].update({
+                'per_device_train_batch_size': 4,
+                'gradient_accumulation_steps': 4,
+            })
             return ProjectConfig(**config_dict)
-        
         return sample_config
     
     def test_initialization(self, sample_config, sample_dataset):
-        """Test basic trainer initialization"""
+        """Test trainer initialization and model loading"""
         trainer = Trainer(config=sample_config, poc_mode=True)
+        
+        # Basic initialization
         assert trainer.poc_mode == True
         assert trainer.model is not None
         assert trainer.tokenizer is not None
+        
+        # Config verification
+        assert trainer.config.model.load_in_4bit == True
+        assert trainer.config.model.max_seq_length <= 384
+        
+        # Model setup
+        assert hasattr(trainer.model, 'lora_A')  # LoRA setup
+        assert trainer.model.config.model_type == "qwen2"
     
     def test_memory_management(self, sample_config):
-        """Test memory clearing functionality"""
-        # Skip if not enough memory
+        """Test GPU memory management"""
         if torch.cuda.get_device_properties(0).total_memory < 8 * 1024**3:
             pytest.skip("Not enough GPU memory")
         
         initial_memory = torch.cuda.memory_allocated()
+        
+        # Load model
         trainer = Trainer(config=sample_config, poc_mode=True)
+        loaded_memory = torch.cuda.memory_allocated()
+        assert loaded_memory > initial_memory, "Model should allocate memory"
+        
+        # Cleanup
         del trainer
         torch.cuda.empty_cache()
         final_memory = torch.cuda.memory_allocated()
-        assert final_memory <= initial_memory
+        assert final_memory <= initial_memory, "Memory should be freed"
     
     def test_dataset_preparation(self, sample_config, sample_dataset):
-        """Test dataset preparation in POC mode"""
+        """Test dataset preparation and validation"""
+        # Test POC mode
         trainer = Trainer(config=sample_config, poc_mode=True)
-        prepared_dataset = trainer.prepare_dataset(sample_dataset)
-        assert len(prepared_dataset) <= 100  # POC size limit
+        poc_dataset = trainer.prepare_dataset(sample_dataset)
+        assert len(poc_dataset) <= 100, "POC should limit dataset size"
+        
+        # Verify dataset format
+        sample = poc_dataset[0]
+        assert 'prompt' in sample, "Dataset should have prompt field"
+        assert 'answer' in sample, "Dataset should have answer field"
+        assert len(sample['prompt']) == 2, "Prompt should have system and user messages"
         
         # Test full mode
         trainer = Trainer(config=sample_config, poc_mode=False)
         full_dataset = trainer.prepare_dataset(sample_dataset)
-        assert len(full_dataset) == len(sample_dataset)
+        assert len(full_dataset) == len(sample_dataset), "Full mode should use entire dataset"
     
     def test_config_validation(self, sample_config):
         """Test configuration validation"""
         # Test invalid memory utilization
-        invalid_config = sample_config.model_dump()
-        invalid_config['model']['gpu_memory_utilization'] = 2.0
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="memory utilization"):
+            invalid_config = sample_config.model_dump()
+            invalid_config['model']['gpu_memory_utilization'] = 2.0
             Trainer(config=ProjectConfig(**invalid_config), poc_mode=True)
-    
-    def test_memory_adjustment(self, sample_config):
-        """Test memory utilization adjustment for small GPUs"""
-        trainer = Trainer(config=sample_config, poc_mode=True)
-        total_gb = torch.cuda.get_device_properties(0).total_memory / 1024**3
-        if total_gb < 10:
-            assert trainer.config.model.gpu_memory_utilization <= 0.8 
+        
+        # Test invalid sequence length
+        with pytest.raises(ValueError, match="sequence length"):
+            invalid_config = sample_config.model_dump()
+            invalid_config['model']['max_seq_length'] = -1
+            Trainer(config=ProjectConfig(**invalid_config), poc_mode=True)
+        
+        # Test invalid batch size
+        with pytest.raises(ValueError, match="batch size"):
+            invalid_config = sample_config.model_dump()
+            invalid_config['training']['per_device_train_batch_size'] = 0
+            Trainer(config=ProjectConfig(**invalid_config), poc_mode=True) 
