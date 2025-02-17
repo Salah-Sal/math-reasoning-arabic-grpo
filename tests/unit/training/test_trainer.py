@@ -62,11 +62,15 @@ class TestTrainer:
         total_gb = total_memory / 1024**3
         
         if total_gb < 10:
-            # Adjust config for smaller GPUs
-            sample_config.model.max_seq_length = 256
-            sample_config.model.gpu_memory_utilization = 0.6
-            sample_config.training.per_device_train_batch_size = 4
-            sample_config.training.gradient_accumulation_steps = 4
+            # Create new config instead of modifying
+            config_dict = sample_config.model_dump()
+            config_dict['model']['max_seq_length'] = 256
+            config_dict['model']['gpu_memory_utilization'] = 0.6
+            config_dict['training']['per_device_train_batch_size'] = 4
+            config_dict['training']['gradient_accumulation_steps'] = 4
+            return ProjectConfig(**config_dict)
+        
+        return sample_config
     
     def test_initialization(self, sample_config, sample_dataset):
         """Test basic trainer initialization"""

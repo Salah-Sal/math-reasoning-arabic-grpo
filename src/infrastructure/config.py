@@ -20,7 +20,7 @@ class ModelConfig(BaseModel):
         le=1.0
     )
     
-    model_config = ConfigDict(frozen=True)  # Make the config immutable
+    model_config = ConfigDict(frozen=False)  # Allow modifications
 
 
 class TrainingConfig(BaseModel):
