@@ -1,0 +1,15 @@
+{
+  "id": "problem_001",
+  "original": {
+    "question": "Cappuccinos cost $2, iced teas cost $3, cafe lattes cost $1.5 and espressos cost $1 each. Sandy orders some drinks for herself and some friends. She orders three cappuccinos, two iced teas, two cafe lattes, and two espressos. How much change does she receive back for a twenty-dollar bill?",
+    "answer": "Find the total cost of the cappuccinos by multiplying the price by the quantity: 3 cappuccinos x $2/cappuccino = $<<3*2=6>>6\nThen do the same for the iced teas: 2 iced teas x $3/tea = $<<2*3=6>>6\nThen do the same for the cafe lattes: 2 lattes x $1.5/latte = $<<2*1.5=3>>3\nThen do the same for the espressos: 2 espressos x $1 = $<<2*1=2>>2\nIn total Sandy pays $6 + $6 + $3 + $2 = $<<6+6+3+2=17>>17\nSandy will receive $20 - $17 = $<<20-17=3>>3 in change\n#### 3"
+  },
+  "translation": {
+    "question": "يكلف الكابتشينو 2 دولارات، والشاي المثلج 3 دولارات، ولاتيه المقهى 1.5 دولار، والإسبريسو 1 دولار لكل واحد. طلبت ساندي بعض المشروبات لنفسها وبعض أصدقائها. طلبت ثلاثة كابتشينو، وشايين مثلجين، ولاتيهين، وإسبريسوهين. كم سيكون المبلغ المتبقي لها من فاتورة عشرين دولارًا؟\n\n#### 20 - (3 * 2 + 2 * 3 + 2 * 1.5 + 2 * 1) = 20 - (6 + 6 + 3 + 2) = 20 - 17 = 3 ####",
+    "answer": "اعثر على التكلفة الإجمالية للكابتشينو بضرب السعر في الكمية: 3 كابتشينو × 2 دولار/كابتشينو = $<<3*2=6>>6\nثم افعل الشيء نفسه للشاي المثلج: 2 شاي مثلج × 3 دولارات/شاي = $<<2*3=6>>6\nثم افعل الشيء نفسه للكافيه لاتيه: 2 لاتيه × 1.5 دولار/لاتيه = $<<2*1.5=3>>3\nثم افعل الشيء نفسه للإسبريسو: 2 إسبريسو × 1 دولار = $<<2*1=2>>2\nفي المجموع تدفع ساندي 6 دولارات + 6 دولارات + 3 دولارات + 2 دولار = $<<6+6+3+2=17>>17\nستحصل ساندي على 20 دولار - 17 دولار = $<<20-17=3>>3 كباقي\n#### 3"
+  },
+  "metadata": {
+    "timestamp": "2025-02-08T02:36:17.411870",
+    "status": "completed"
+  }
+} 
