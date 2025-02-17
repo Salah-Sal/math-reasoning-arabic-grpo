@@ -202,3 +202,88 @@ To modify logging behavior:
 
 For more detailed information about logging specific components, refer to the documentation in each module.
 
+## Data Module
+
+### Overview
+The data module handles loading and processing of Arabic mathematical problems from JSON files. It provides a clean interface for accessing the dataset and converting it to formats needed for training.
+
+### Dataset Structure
+```json
+{
+  "id": "problem_001",
+  "original": {
+    "question": "English math question...",
+    "answer": "English solution... #### 42"
+  },
+  "translation": {
+    "question": "Arabic math question...",
+    "answer": "Arabic solution... #### ٤٢"
+  },
+  "metadata": {
+    "timestamp": "2024-02-20T10:00:00",
+    "status": "completed"
+  }
+}
+```
+
+### Using the Dataset
+```python
+from src.data.dataset import ArabicMathDataset
+
+# Initialize dataset
+dataset = ArabicMathDataset(
+    data_dir="/path/to/data",
+    system_prompt="Optional custom system prompt"
+)
+
+# Access data
+print(f"Dataset size: {len(dataset)}")
+example = dataset[0]
+
+# Convert to HuggingFace dataset
+hf_dataset = dataset.to_huggingface_dataset()
+```
+
+### Data Processing
+The dataset class handles:
+- JSON file loading and validation
+- Arabic text processing
+- Answer extraction and normalization
+- Arabic to English numeral conversion
+- Training format preparation
+
+### Output Format
+Each dataset item is formatted as:
+```python
+{
+    'prompt': [
+        {
+            'role': 'system',
+            'content': 'System prompt in Arabic'
+        },
+        {
+            'role': 'user',
+            'content': 'Arabic math question'
+        }
+    ],
+    'answer': 'Numerical answer'
+}
+```
+
+### Adding New Data
+When contributing new problem files:
+1. Follow the JSON structure shown above
+2. Place files in the data directory
+3. Ensure answers are marked with #### delimiter
+4. Include both English and Arabic versions
+5. Validate data format using dataset validation
+
+### Best Practices
+- Use UTF-8 encoding for all files
+- Include step-by-step solutions in answers
+- Maintain consistent formatting
+- Handle Arabic numerals appropriately
+- Test with sample data before adding large datasets
+
+For more detailed information about data processing and formats, refer to the documentation in the data module.
+
