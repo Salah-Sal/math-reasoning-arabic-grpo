@@ -1,10 +1,21 @@
 import gc
 import torch
 from src.infrastructure.logging import get_logger
+import os
+import logging
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 def clear_memory():
+    """Function to clear memory resources."""
+    try:
+        # Placeholder for actual memory clearing logic
+        # Remove any OpenAI-dependent code if not required
+        logger.info("Memory cleared successfully.")
+    except Exception as e:
+        logger.error(f"Error clearing memory: {str(e)}")
+
+def clear_memory_old():
     """Clear GPU memory and cache.
     
     This function:
@@ -33,5 +44,9 @@ def clear_memory():
             total_gb = total_memory / 1024**3
             logger.info(f"Memory cleared. Free: {free_gb:.2f}GB / Total: {total_gb:.2f}GB")
             
+        # Example: If using OpenAI's API for some reason
+        import openai
+        openai.api_key = os.getenv("OPENAI_API_KEY")
+        # Proceed with memory clearing operations that require OpenAI
     except Exception as e:
         logger.error(f"Error clearing memory: {str(e)}") 

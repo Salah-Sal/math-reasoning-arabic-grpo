@@ -97,16 +97,20 @@ class Trainer:
     
     def _adjust_config_based_on_gpu(self, config: ProjectConfig, total_gb: float) -> ProjectConfig:
         """Adjust configuration settings based on available GPU memory."""
-        adjusted_model_config = config.model.copy()
-        adjusted_training_config = config.training.copy()
-
         if total_gb < 10:
-            adjusted_model_config.max_seq_length = 256
-            adjusted_model_config.gpu_memory_utilization = 0.6
-            adjusted_training_config.per_device_train_batch_size = 1
-            adjusted_training_config.gradient_accumulation_steps = 1
-            adjusted_training_config.num_generations = 4
+            adjusted_model_config = config.model.model_copy(update={
+                "max_seq_length": 256,
+                "gpu_memory_utilization": 0.6
+            })
+            adjusted_training_config = config.training.model_copy(update={
+                "per_device_train_batch_size": 1,
+                "gradient_accumulation_steps": 1,
+                "num_generations": 4
+            })
             logger.info("Adjusted settings for GPUs with less memory")
+        else:
+            adjusted_model_config = config.model
+            adjusted_training_config = config.training
 
         return ProjectConfig(
             model=adjusted_model_config,
