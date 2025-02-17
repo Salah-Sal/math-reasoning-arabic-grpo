@@ -139,17 +139,19 @@ class TestTrainer:
             invalid_config = sample_config.model_dump()
             invalid_config['model']['gpu_memory_utilization'] = 2.0
             Trainer(config=ProjectConfig(**invalid_config), poc_mode=True)
-        assert any(
-            'gpu_memory_utilization' in str(exc_info.value),
-            'should be less than or equal to 1' in str(exc_info.value)
-        )
+        error_message = str(exc_info.value)
+        assert any([
+            'gpu_memory_utilization' in error_message,
+            'should be less than or equal to 1' in error_message
+        ])
         
         # Test invalid sequence length
         with pytest.raises(Exception) as exc_info:
             invalid_config = sample_config.model_dump()
             invalid_config['model']['max_seq_length'] = -1
             Trainer(config=ProjectConfig(**invalid_config), poc_mode=True)
-        assert 'max_seq_length' in str(exc_info.value)
+        error_message = str(exc_info.value)
+        assert 'max_seq_length' in error_message, f"Expected 'max_seq_length' in error: {error_message}"
         
         # Test invalid batch size
         with pytest.raises(ValueError, match="batch size"):
