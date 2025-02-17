@@ -1,0 +1,24 @@
+model:
+  model_name: "Qwen/Qwen2.5-1.5B-Instruct"
+  max_seq_length: 256
+  load_in_4bit: true
+  fast_inference: true
+  max_lora_rank: 8
+  gpu_memory_utilization: 0.5
+
+training:
+  learning_rate: 1.0e-5
+  per_device_train_batch_size: 4
+  gradient_accumulation_steps: 4
+  max_prompt_length: 128
+  max_completion_length: 64
+  logging_steps: 5
+  save_steps: 100
+
+data:
+  data_dir: "/tmp/test_data"
+  output_dir: "/tmp/test_output"
+  cache_dir: "/tmp/test_cache"
+
+seed: 42
+device: "cuda" 
