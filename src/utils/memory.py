@@ -21,6 +21,12 @@ def clear_memory():
             torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats()
             
+            # Force garbage collection
+            for obj in gc.get_objects():
+                if torch.is_tensor(obj):
+                    del obj
+            gc.collect()
+            
             # Log memory status
             free_memory, total_memory = torch.cuda.mem_get_info()
             free_gb = free_memory / 1024**3

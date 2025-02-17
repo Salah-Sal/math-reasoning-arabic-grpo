@@ -66,13 +66,14 @@ class Trainer:
             
             logger.info(f"GPU Memory: {free_gb:.2f}GB free of {total_gb:.2f}GB total")
             
-            # Adjust memory utilization based on available memory
-            if total_gb < 10:  # For GPUs with less than 10GB
-                self.config.model.gpu_memory_utilization = min(
-                    0.8,  # Maximum utilization
-                    self.config.model.gpu_memory_utilization
-                )
-                logger.info(f"Adjusted GPU memory utilization to {self.config.model.gpu_memory_utilization}")
+            # Adjust settings for 8GB GPU
+            if total_gb < 10:
+                self.config.model.max_seq_length = 256
+                self.config.model.gpu_memory_utilization = 0.6
+                self.config.training.per_device_train_batch_size = 1
+                self.config.training.gradient_accumulation_steps = 1
+                self.config.training.num_generations = 4
+                logger.info("Adjusted settings for 8GB GPU")
 
             logger.info(f"Loading model: {self.config.model.model_name}")
             self.model, self.tokenizer = FastLanguageModel.from_pretrained(
@@ -84,13 +85,13 @@ class Trainer:
                 gpu_memory_utilization=self.config.model.gpu_memory_utilization
             )
             
-            # Configure PEFT
+            # Configure PEFT with optimized settings
             self.model = FastLanguageModel.get_peft_model(
                 self.model,
                 r=self.config.model.max_lora_rank,
                 target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
                 lora_alpha=16,
-                use_gradient_checkpointing="unsloth",
+                use_gradient_checkpointing="unsloth",  # Enable Unsloth optimizations
                 random_state=3407,
             )
             

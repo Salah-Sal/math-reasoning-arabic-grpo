@@ -9,9 +9,9 @@ class ModelConfig(BaseModel):
         default="Qwen/Qwen2.5-1.5B-Instruct",
         description="Name of the base model to use"
     )
-    max_seq_length: int = Field(default=256, description="Maximum sequence length")
+    max_seq_length: int = Field(default=256, description="Maximum sequence length for 8GB GPU")
     load_in_4bit: bool = Field(default=True, description="Whether to load in 4-bit quantization")
-    fast_inference: bool = Field(default=True, description="Enable fast inference mode")
+    fast_inference: bool = Field(default=True, description="Use vLLM for fast inference")
     max_lora_rank: int = Field(default=8, description="Maximum LoRA rank")
     gpu_memory_utilization: float = Field(
         default=0.6,
@@ -26,10 +26,15 @@ class ModelConfig(BaseModel):
 class TrainingConfig(BaseModel):
     """Configuration for training parameters"""
     learning_rate: float = Field(default=5e-6, description="Learning rate for training")
-    per_device_train_batch_size: int = Field(default=4, description="Batch size per device")
-    gradient_accumulation_steps: int = Field(default=4, description="Number of gradient accumulation steps")
+    per_device_train_batch_size: int = Field(default=1, description="Batch size per device")
+    gradient_accumulation_steps: int = Field(default=1, description="Gradient accumulation steps")
+    num_generations: int = Field(default=4, description="Number of generations per prompt")
     max_prompt_length: int = Field(default=256, description="Maximum prompt length")
     max_completion_length: int = Field(default=128, description="Maximum completion length")
+    weight_decay: float = Field(default=0.1, description="Weight decay")
+    warmup_ratio: float = Field(default=0.1, description="Warmup ratio")
+    lr_scheduler_type: str = Field(default="cosine", description="Learning rate scheduler type")
+    optim: str = Field(default="adamw_8bit", description="Optimizer type")
     logging_steps: int = Field(default=10, description="Number of steps between logging")
     save_steps: int = Field(default=500, description="Number of steps between model saves")
     
