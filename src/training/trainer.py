@@ -28,6 +28,9 @@ class Trainer:
         # Clear memory before initialization
         clear_memory()
         
+        # Force garbage collection and cache clearing
+        torch.cuda.empty_cache()
+        
         # Validate configuration
         self._validate_config(config)
         

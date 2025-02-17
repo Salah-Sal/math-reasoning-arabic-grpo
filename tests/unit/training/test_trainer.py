@@ -16,9 +16,9 @@ def sample_config(tmp_path):
             model_name="Qwen/Qwen2.5-1.5B-Instruct",
             max_seq_length=384,
             load_in_4bit=True,
-            fast_inference=True,
+            fast_inference=False,
             max_lora_rank=8,
-            gpu_memory_utilization=0.5
+            gpu_memory_utilization=0.7
         ),
         training=dict(
             learning_rate=5e-6,
@@ -49,11 +49,24 @@ def sample_dataset(tmp_path):
     return ArabicMathDataset(data_dir=data_dir)
 
 @pytest.mark.skipif(
-    torch.cuda.get_device_properties(0).total_memory < 10 * 1024**3,
-    reason="Test requires GPU with at least 10GB VRAM"
+    not torch.cuda.is_available(),
+    reason="CUDA is not available"
 )
 class TestTrainer:
     """Test suite for Trainer class"""
+    
+    @pytest.fixture(autouse=True)
+    def setup(self, sample_config):
+        """Setup for each test - adjust config for available GPU memory"""
+        total_memory = torch.cuda.get_device_properties(0).total_memory
+        total_gb = total_memory / 1024**3
+        
+        if total_gb < 10:
+            # Adjust config for smaller GPUs
+            sample_config.model.max_seq_length = 256
+            sample_config.model.gpu_memory_utilization = 0.6
+            sample_config.training.per_device_train_batch_size = 4
+            sample_config.training.gradient_accumulation_steps = 4
     
     def test_initialization(self, sample_config, sample_dataset):
         """Test basic trainer initialization"""
@@ -64,6 +77,10 @@ class TestTrainer:
     
     def test_memory_management(self, sample_config):
         """Test memory clearing functionality"""
+        # Skip if not enough memory
+        if torch.cuda.get_device_properties(0).total_memory < 8 * 1024**3:
+            pytest.skip("Not enough GPU memory")
+        
         initial_memory = torch.cuda.memory_allocated()
         trainer = Trainer(config=sample_config, poc_mode=True)
         del trainer
@@ -93,5 +110,6 @@ class TestTrainer:
     def test_memory_adjustment(self, sample_config):
         """Test memory utilization adjustment for small GPUs"""
         trainer = Trainer(config=sample_config, poc_mode=True)
-        if torch.cuda.get_device_properties(0).total_memory < 10 * 1024**3:
+        total_gb = torch.cuda.get_device_properties(0).total_memory / 1024**3
+        if total_gb < 10:
             assert trainer.config.model.gpu_memory_utilization <= 0.8 
