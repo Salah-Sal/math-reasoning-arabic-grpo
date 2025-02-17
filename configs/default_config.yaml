@@ -1,0 +1,24 @@
+model:
+  model_name: "Qwen/Qwen2.5-1.5B-Instruct"
+  max_seq_length: 384
+  load_in_4bit: true
+  fast_inference: false
+  max_lora_rank: 16
+  gpu_memory_utilization: 0.7
+
+training:
+  learning_rate: 5.0e-6
+  per_device_train_batch_size: 8
+  gradient_accumulation_steps: 8
+  max_prompt_length: 256
+  max_completion_length: 128
+  logging_steps: 10
+  save_steps: 500
+
+data:
+  data_dir: "/home/Sal3/ml_data/translations"
+  output_dir: "./outputs"
+  cache_dir: null
+
+seed: 3407
+device: "cuda" 
