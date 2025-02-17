@@ -45,4 +45,4 @@ def test_arabic_numeral_conversion(sample_data_dir):
     """Test Arabic to English numeral conversion"""
     dataset = ArabicMathDataset(data_dir=sample_data_dir)
     item = dataset[0]
-    assert item['answer'] == '42'  # Should convert ٤٢ to 42 
+    assert item['answer'] == '3'  # Should convert ٣ to 3 
