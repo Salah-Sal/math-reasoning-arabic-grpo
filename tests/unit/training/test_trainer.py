@@ -2,7 +2,7 @@ import pytest
 from pathlib import Path
 from src.training.trainer import Trainer
 from src.data.dataset import ArabicMathDataset
-from src.infrastructure.config import ProjectConfig, ModelConfig, TrainingConfig
+from src.infrastructure.config import ProjectConfig, ModelConfig, TrainingConfig, DataConfig
 from src.infrastructure.logging import get_logger
 import torch
 
@@ -10,30 +10,39 @@ logger = get_logger(__name__)
 
 @pytest.fixture
 def sample_config(tmp_path):
-    """Create a sample configuration for POC training"""
-    # Create configs with 8GB GPU settings
-    model_config = ModelConfig(
-        model_name="Qwen/Qwen2.5-1.5B-Instruct",
-        max_seq_length=256,
-        load_in_4bit=True,
-        fast_inference=True,
-        max_lora_rank=8,
-        gpu_memory_utilization=0.6
+    """Create a sample configuration for testing"""
+    config = ProjectConfig(
+        model=ModelConfig(
+            model_name="Qwen/Qwen2.5-1.5B-Instruct",
+            max_seq_length=256,
+            load_in_4bit=True,
+            fast_inference=True,
+            max_lora_rank=8,
+            gpu_memory_utilization=0.6
+        ),
+        training=TrainingConfig(
+            learning_rate=5e-6,
+            per_device_train_batch_size=1,
+            gradient_accumulation_steps=1,
+            num_generations=4,
+            max_prompt_length=256,
+            max_completion_length=128,
+            weight_decay=0.1,
+            warmup_ratio=0.1,
+            lr_scheduler_type='cosine',
+            optim='adamw_8bit',
+            logging_steps=10,
+            save_steps=500
+        ),
+        data=DataConfig(
+            data_dir=tmp_path / "data",
+            output_dir=tmp_path / "outputs",
+            cache_dir=tmp_path / "cache"
+        ),
+        seed=3407,
+        device="cuda"
     )
-    
-    training_config = TrainingConfig(
-        learning_rate=5e-6,
-        per_device_train_batch_size=1,
-        gradient_accumulation_steps=1,
-        num_generations=4,
-        max_steps=10,
-        logging_steps=1
-    )
-    
-    return ProjectConfig(
-        model=model_config,
-        training=training_config
-    )
+    return config
 
 @pytest.fixture
 def sample_dataset(tmp_path):
@@ -41,15 +50,9 @@ def sample_dataset(tmp_path):
     data_dir = tmp_path / "sample_data"
     data_dir.mkdir()
     
-    sample_file = Path(__file__).parent.parent.parent / "fixtures" / "data" / "sample_problems" / "problem_001.json"
-    if not sample_file.exists():
-        pytest.skip("Sample data file not found")
-    
-    with open(sample_file, 'r', encoding='utf-8') as f:
-        content = f.read()
-    
-    with open(data_dir / "problem_001.json", 'w', encoding='utf-8') as f:
-        f.write(content)
+    sample_file = tmp_path / "sample_problems" / "problem_001.json"
+    sample_file.parent.mkdir(parents=True, exist_ok=True)
+    sample_file.write_text('{"translation": {"question": "Test question?", "answer": "Answer #### 42"}}')
     
     return ArabicMathDataset(data_dir=data_dir)
 
@@ -65,15 +68,18 @@ class TestTrainer:
         trainer = Trainer(config=sample_config, poc_mode=True)
         
         # Basic initialization
-        assert trainer.poc_mode == True
+        assert trainer.poc_mode is True
         assert trainer.model is not None
         assert trainer.tokenizer is not None
         
         # Config verification
-        assert trainer.config.model.load_in_4bit == True
+        assert trainer.config.model.load_in_4bit is True
         assert trainer.config.model.max_seq_length <= 384
         
-        # Model setup
+        # Trainer's adjusted config should have specific settings
+        assert trainer.config.training.per_device_train_batch_size == sample_config.training.per_device_train_batch_size
+        assert trainer.config.training.gradient_accumulation_steps == sample_config.training.gradient_accumulation_steps
+        
         # Check LoRA setup in attention layers
         has_lora = False
         for name, module in trainer.model.named_modules():
@@ -94,7 +100,7 @@ class TestTrainer:
         # Load model
         trainer = Trainer(config=sample_config, poc_mode=True)
         loaded_memory = torch.cuda.memory_allocated()
-        assert loaded_memory > initial_memory, "Model should allocate memory"
+        assert loaded_memory > initial_memory, "Model should allocate more GPU memory"
         
         # Cleanup
         del trainer
@@ -104,7 +110,6 @@ class TestTrainer:
     
     def test_dataset_preparation(self, sample_config, sample_dataset):
         """Test dataset preparation and validation"""
-        # Test POC mode
         trainer = Trainer(config=sample_config, poc_mode=True)
         poc_dataset = trainer.prepare_dataset(sample_dataset)
         assert len(poc_dataset) <= 100, "POC should limit dataset size"
@@ -116,32 +121,44 @@ class TestTrainer:
         assert len(sample['prompt']) == 2, "Prompt should have system and user messages"
         
         # Test full mode
-        trainer = Trainer(config=sample_config, poc_mode=False)
-        full_dataset = trainer.prepare_dataset(sample_dataset)
+        trainer_full = Trainer(config=sample_config, poc_mode=False)
+        full_dataset = trainer_full.prepare_dataset(sample_dataset)
         assert len(full_dataset) == len(sample_dataset), "Full mode should use entire dataset"
     
     def test_config_validation(self, sample_config):
         """Test configuration validation"""
         # Test invalid memory utilization
-        with pytest.raises(Exception) as exc_info:
-            invalid_config = sample_config.model_dump()
-            invalid_config['model']['gpu_memory_utilization'] = 2.0
-            Trainer(config=ProjectConfig(**invalid_config), poc_mode=True)
+        with pytest.raises(ValueError) as exc_info:
+            ProjectConfig(
+                model=sample_config.model.copy(update={"gpu_memory_utilization": 2.0}),
+                training=sample_config.training,
+                data=sample_config.data,
+                seed=sample_config.seed,
+                device=sample_config.device
+            )
         error_message = str(exc_info.value)
-        assert 'less than or equal to 1' in error_message
+        assert 'gpu_memory_utilization must be between 0 and 1' in error_message
         
-        # Test invalid sequence length
-        with pytest.raises(Exception) as exc_info:
-            invalid_config = sample_config.model_dump()
-            invalid_config['model']['max_seq_length'] = -1
-            Trainer(config=ProjectConfig(**invalid_config), poc_mode=True)
+        # Test invalid max_seq_length
+        with pytest.raises(ValueError) as exc_info:
+            ProjectConfig(
+                model=sample_config.model.copy(update={"max_seq_length": -1}),
+                training=sample_config.training,
+                data=sample_config.data,
+                seed=sample_config.seed,
+                device=sample_config.device
+            )
         error_message = str(exc_info.value)
-        assert 'sequence length must be positive' in error_message
+        assert 'Maximum sequence length must be positive' in error_message
         
         # Test invalid batch size
-        with pytest.raises(Exception) as exc_info:
-            invalid_config = sample_config.model_dump()
-            invalid_config['training']['per_device_train_batch_size'] = 0
-            Trainer(config=ProjectConfig(**invalid_config), poc_mode=True)
+        with pytest.raises(ValueError) as exc_info:
+            ProjectConfig(
+                model=sample_config.model,
+                training=sample_config.training.copy(update={"per_device_train_batch_size": 0}),
+                data=sample_config.data,
+                seed=sample_config.seed,
+                device=sample_config.device
+            )
         error_message = str(exc_info.value)
-        assert 'batch size must be positive' in error_message.lower() 
+        assert 'Batch size must be positive' in error_message.lower() 

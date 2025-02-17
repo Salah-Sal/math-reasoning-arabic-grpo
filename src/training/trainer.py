@@ -66,29 +66,23 @@ class Trainer:
             
             logger.info(f"GPU Memory: {free_gb:.2f}GB free of {total_gb:.2f}GB total")
             
-            # Adjust settings for 8GB GPU
-            if total_gb < 10:
-                self.config.model.max_seq_length = 256
-                self.config.model.gpu_memory_utilization = 0.6
-                self.config.training.per_device_train_batch_size = 1
-                self.config.training.gradient_accumulation_steps = 1
-                self.config.training.num_generations = 4
-                logger.info("Adjusted settings for 8GB GPU")
-
-            logger.info(f"Loading model: {self.config.model.model_name}")
+            # Adjust settings for GPUs with less memory without mutating the config
+            adjusted_config = self._adjust_config_based_on_gpu(self.config, total_gb)
+            
+            logger.info(f"Loading model: {adjusted_config.model.model_name}")
             self.model, self.tokenizer = FastLanguageModel.from_pretrained(
-                model_name=self.config.model.model_name,
-                max_seq_length=self.config.model.max_seq_length,
-                load_in_4bit=self.config.model.load_in_4bit,
-                fast_inference=self.config.model.fast_inference,
-                max_lora_rank=self.config.model.max_lora_rank,
-                gpu_memory_utilization=self.config.model.gpu_memory_utilization
+                model_name=adjusted_config.model.model_name,
+                max_seq_length=adjusted_config.model.max_seq_length,
+                load_in_4bit=adjusted_config.model.load_in_4bit,
+                fast_inference=adjusted_config.model.fast_inference,
+                max_lora_rank=adjusted_config.model.max_lora_rank,
+                gpu_memory_utilization=adjusted_config.model.gpu_memory_utilization
             )
             
             # Configure PEFT with optimized settings
             self.model = FastLanguageModel.get_peft_model(
                 self.model,
-                r=self.config.model.max_lora_rank,
+                r=adjusted_config.model.max_lora_rank,
                 target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
                 lora_alpha=16,
                 use_gradient_checkpointing="unsloth",  # Enable Unsloth optimizations
@@ -100,6 +94,27 @@ class Trainer:
         except Exception as e:
             logger.error(f"Failed to initialize model: {str(e)}")
             raise
+    
+    def _adjust_config_based_on_gpu(self, config: ProjectConfig, total_gb: float) -> ProjectConfig:
+        """Adjust configuration settings based on available GPU memory."""
+        adjusted_model_config = config.model.copy()
+        adjusted_training_config = config.training.copy()
+
+        if total_gb < 10:
+            adjusted_model_config.max_seq_length = 256
+            adjusted_model_config.gpu_memory_utilization = 0.6
+            adjusted_training_config.per_device_train_batch_size = 1
+            adjusted_training_config.gradient_accumulation_steps = 1
+            adjusted_training_config.num_generations = 4
+            logger.info("Adjusted settings for GPUs with less memory")
+
+        return ProjectConfig(
+            model=adjusted_model_config,
+            training=adjusted_training_config,
+            data=config.data,
+            seed=config.seed,
+            device=config.device
+        )
     
     def prepare_dataset(self, dataset: ArabicMathDataset):
         """Prepare dataset for training.
