@@ -26,6 +26,7 @@ class ArabicMathDataset:
         self.cache_dir = Path(cache_dir) if cache_dir else None
         self.system_prompt = system_prompt or "أنت مساعد ذكي متخصص في حل المسائل الرياضية. قم بحل المسألة التالية خطوة بخطوة."
         self._data: List[Dict] = []
+        self._hf_dataset: Optional[Dataset] = None
         
         # Verify directory exists
         if not self.data_dir.exists():
@@ -39,6 +40,69 @@ class ArabicMathDataset:
         
         self._load_data()
         
+    @property
+    def features(self):
+        """Get dataset features for HuggingFace compatibility."""
+        if self._hf_dataset is None:
+            self._hf_dataset = self.to_huggingface_dataset()
+        return self._hf_dataset.features
+    
+    @property
+    def column_names(self):
+        """Get column names for HuggingFace compatibility."""
+        if self._hf_dataset is None:
+            self._hf_dataset = self.to_huggingface_dataset()
+        return self._hf_dataset.column_names
+    
+    def __getitem__(self, idx):
+        """Get an item from the dataset."""
+        if self._hf_dataset is None:
+            self._hf_dataset = self.to_huggingface_dataset()
+        return self._hf_dataset[idx]
+    
+    def __len__(self):
+        """Get dataset length."""
+        return len(self._data)
+    
+    def to_huggingface_dataset(self) -> Dataset:
+        """Convert to HuggingFace Dataset format."""
+        logger.info("Converting to HuggingFace Dataset")
+        try:
+            if not self._data:
+                logger.error("No data loaded to convert to HuggingFace Dataset")
+                raise ValueError("Dataset is empty")
+            
+            # Convert our data format to HuggingFace format
+            hf_data = []
+            for item in self._data:
+                hf_item = {
+                    'prompt': item['prompt'],
+                    'answer': item['answer']
+                }
+                hf_data.append(hf_item)
+            
+            dataset = Dataset.from_list(hf_data)
+            logger.info(f"Successfully converted to HuggingFace Dataset with {len(dataset)} examples")
+            logger.debug(f"Dataset features: {dataset.features}")
+            logger.debug(f"Dataset columns: {dataset.column_names}")
+            
+            return dataset
+        except Exception as e:
+            logger.error(f"Error converting to HuggingFace Dataset: {str(e)}")
+            raise
+    
+    def sample_batch(self, batch_size: int) -> Dict:
+        """Sample a batch of examples for monitoring."""
+        if not self._data:
+            logger.warning("No data available for sampling")
+            return {}
+        
+        import random
+        indices = random.sample(range(len(self._data)), min(batch_size, len(self._data)))
+        batch = [self._data[i] for i in indices]
+        logger.info(f"Sampled batch of size {len(batch)}")
+        return {'examples': batch}
+    
     def _load_data(self) -> None:
         """Load and process all JSON files in the data directory."""
         try:
@@ -131,16 +195,4 @@ class ArabicMathDataset:
             isinstance(item.get('answer', ''), str) and
             len(item.get('prompt', [])) == 2
             for item in self._data
-        )
-    
-    def __len__(self) -> int:
-        """Return the number of examples in the dataset."""
-        return len(self._data)
-    
-    def __getitem__(self, idx: int) -> Dict:
-        """Get a specific example from the dataset."""
-        return self._data[idx]
-    
-    def to_huggingface_dataset(self) -> Dataset:
-        """Convert to HuggingFace Dataset format."""
-        return Dataset.from_list(self._data) 
+        ) 

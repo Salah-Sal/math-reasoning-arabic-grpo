@@ -82,24 +82,48 @@ class TrainingMonitor(BaseCallback):
         
         self.logger.info("========================")
     
-    def log_dataset_info(self, dataset: Dataset):
+    def log_dataset_info(self, dataset):
         """Log dataset statistics and information."""
         self.logger.info("=== Dataset Information ===")
-        self.logger.info(f"Dataset Size: {len(dataset)}")
-        self.logger.info(f"Features: {dataset.features}")
-        self.logger.info(f"Column Names: {dataset.column_names}")
         
-        # Log sample counts and basic statistics
-        if len(dataset) > 0:
-            for column in dataset.column_names:
-                if isinstance(dataset[0][column], (int, float)):
-                    values = [item[column] for item in dataset]
-                    self.logger.info(f"{column} stats:")
-                    self.logger.info(f"  Mean: {sum(values)/len(values):.2f}")
-                    self.logger.info(f"  Min: {min(values)}")
-                    self.logger.info(f"  Max: {max(values)}")
+        try:
+            # Basic dataset info
+            self.logger.info(f"Dataset Size: {len(dataset)}")
+            
+            # Try to get HuggingFace Dataset features
+            try:
+                self.logger.info(f"Features: {dataset.features}")
+                self.logger.info(f"Column Names: {dataset.column_names}")
+            except AttributeError:
+                self.logger.info("Dataset does not have HuggingFace features/columns")
+            
+            # Sample and log first example
+            try:
+                first_example = dataset[0]
+                self.logger.info("First example structure:")
+                for key, value in first_example.items():
+                    preview = str(value)[:100] + "..." if len(str(value)) > 100 else str(value)
+                    self.logger.info(f"  {key}: {preview}")
+            except Exception as e:
+                self.logger.warning(f"Could not log first example: {str(e)}")
+            
+            # Try to get basic statistics if possible
+            if hasattr(dataset, 'column_names'):
+                for column in dataset.column_names:
+                    try:
+                        if isinstance(dataset[0][column], (int, float)):
+                            values = [item[column] for item in dataset]
+                            self.logger.info(f"{column} stats:")
+                            self.logger.info(f"  Mean: {sum(values)/len(values):.2f}")
+                            self.logger.info(f"  Min: {min(values)}")
+                            self.logger.info(f"  Max: {max(values)}")
+                    except Exception as e:
+                        self.logger.debug(f"Could not compute stats for column {column}: {str(e)}")
+            
+        except Exception as e:
+            self.logger.error(f"Error logging dataset info: {str(e)}")
         
-        self.logger.info("========================")
+        self.logger.info("=========================")
     
     def log_batch_processing(self, batch: Dict[str, Any]):
         """Log information about batch processing."""
