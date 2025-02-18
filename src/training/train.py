@@ -1,10 +1,10 @@
 import torch
 from pathlib import Path
 from unsloth import FastLanguageModel, PatchFastRL
-from trl import GRPOConfig, GRPOTrainer
+from trl import GRPOConfig as TRLConfig
 from src.training.monitoring import TrainingMonitor
 from src.data.dataset import ArabicMathDataset
-from src.infrastructure.config import GRPOConfig as ProjectConfig
+from src.training.config import GRPOConfig
 from src.infrastructure.logging import get_logger
 from src.training.callbacks.checkpoint import ModelCheckpointCallback
 from src.training.callbacks.early_stopping import EarlyStoppingCallback
@@ -70,11 +70,23 @@ def train_model(config_path: Union[str, Path]) -> None:
                 )
             )
         
-        # Initialize trainer
+        # Initialize trainer with TRL config
+        training_args = TRLConfig(
+            learning_rate=config.training.learning_rate,
+            max_steps=config.training.max_steps,
+            per_device_train_batch_size=config.training.per_device_train_batch_size,
+            gradient_accumulation_steps=config.training.gradient_accumulation_steps,
+            max_prompt_length=config.training.max_prompt_length,
+            max_completion_length=config.training.max_completion_length,
+            logging_steps=config.training.logging_steps,
+            output_dir=str(config.paths.output_dir),
+            report_to=config.training.report_to
+        )
+        
         trainer = GRPOTrainer(
             model=model,
-            dataset=dataset,
-            config=config,
+            args=training_args,
+            train_dataset=dataset,
             callbacks=callbacks
         )
         
