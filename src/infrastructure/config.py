@@ -105,4 +105,42 @@ class ProjectConfig(BaseModel):
             with open(config_path, 'w') as f:
                 yaml.dump(config_dict, f)
         except Exception as e:
-            raise ValueError(f"Error saving configuration to {config_path}: {str(e)}") 
+            raise ValueError(f"Error saving configuration to {config_path}: {str(e)}")
+
+
+class ModelSettings(BaseModel):
+    """Model configuration settings."""
+    model_name: str = Field(
+        default="Qwen/Qwen2.5-1.5B-Instruct",
+        description="Name or path of the model to use"
+    )
+    trust_remote_code: bool = Field(
+        default=True,
+        description="Whether to trust remote code when loading model"
+    )
+    load_in_4bit: bool = Field(
+        default=True,
+        description="Whether to load model in 4-bit quantization"
+    )
+    use_flash_attention: bool = Field(
+        default=True,
+        description="Whether to use flash attention"
+    )
+    # Add LoRA configuration
+    lora_rank: int = Field(
+        default=16,
+        description="Rank of LoRA matrices"
+    )
+    lora_alpha: int = Field(
+        default=16,
+        description="Alpha parameter for LoRA"
+    )
+    target_modules: List[str] = Field(
+        default=["q_proj", "k_proj", "v_proj", "o_proj", 
+                "gate_proj", "up_proj", "down_proj"],
+        description="Target modules for LoRA"
+    )
+    lora_dropout: float = Field(
+        default=0.05,
+        description="Dropout probability for LoRA layers"
+    ) 
