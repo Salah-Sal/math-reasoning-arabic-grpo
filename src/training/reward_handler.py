@@ -36,8 +36,10 @@ class RewardHandler:
             weights = config["weights"]
             total = sum(weights.values())
             logger.debug(f"Total weight sum before normalization: {total}")
+            
             # Only normalize if total is significantly different from 1.0
-            if abs(total - 1.0) > 1e-6:
+            # AND if we're using the default config (not a custom one)
+            if abs(total - 1.0) > 1e-6 and config is self.DEFAULT_CONFIG:
                 config["weights"] = {k: v/total for k, v in weights.items()}
                 logger.debug(f"Normalized weights: {config['weights']}")
         return config
