@@ -72,7 +72,11 @@ def test_save_model_lora(mock_fast_language_model, qwen_model, tmp_path):
     """Test saving model with LoRA method."""
     # Setup mock model and tokenizer
     mock_model = MagicMock()
+    mock_base_model = MagicMock()
     mock_tokenizer = MagicMock()
+    
+    # Setup the model hierarchy to match PEFT structure
+    mock_model.base_model = mock_base_model
     mock_fast_language_model.from_pretrained.return_value = (mock_model, mock_tokenizer)
     qwen_model.load_model()
     
@@ -80,7 +84,8 @@ def test_save_model_lora(mock_fast_language_model, qwen_model, tmp_path):
     save_path = str(tmp_path / "test_model")
     qwen_model.save_model(save_path, save_method="lora")
     
-    mock_model.save_lora.assert_called_once_with(save_path)
+    # Verify that save_pretrained was called on the base_model
+    mock_base_model.save_pretrained.assert_called_once_with(save_path)
 
 @patch('src.core.model.qwen_model.FastLanguageModel')
 def test_save_model_merged(mock_fast_language_model, qwen_model, tmp_path):
