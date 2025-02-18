@@ -1,10 +1,17 @@
 from typing import Optional
 from src.training.callbacks.base import BaseCallback
 from src.infrastructure.logging import get_logger
+from transformers import (
+    TrainingArguments,
+    TrainerState,
+    TrainerControl,
+    TrainerCallback,
+    __version__ as transformers_version
+)
 
 logger = get_logger(__name__)
 
-class EarlyStoppingCallback(BaseCallback):
+class EarlyStoppingCallback(TrainerCallback, BaseCallback):
     """Callback for early stopping based on reward improvement.
     
     This callback monitors the reward during training and stops training
@@ -26,7 +33,17 @@ class EarlyStoppingCallback(BaseCallback):
             min_steps: Minimum number of steps before allowing early stopping
             order: Callback execution order
         """
-        super().__init__(order=order)
+        logger.info("Initializing EarlyStoppingCallback")
+        logger.info(f"Callback bases: {self.__class__.__bases__}")
+        
+        # Initialize both parent classes
+        try:
+            BaseCallback.__init__(self)
+            TrainerCallback.__init__(self)
+            logger.info("Successfully initialized parent classes")
+        except Exception as e:
+            logger.error(f"Error initializing parent classes: {str(e)}")
+            raise
         
         # Validate parameters
         if patience < 0:
@@ -39,10 +56,13 @@ class EarlyStoppingCallback(BaseCallback):
         self.patience = patience
         self.min_improvement = min_improvement
         self.min_steps = min_steps
+        self.order = order
         
         # Initialize tracking variables
         self._best_reward = float('-inf')
         self._steps_without_improvement = 0
+        self._model = None
+        self._trainer = None
         
         logger.info(
             f"Initialized early stopping callback:\n"
@@ -51,6 +71,88 @@ class EarlyStoppingCallback(BaseCallback):
             f"  Min steps: {min_steps}"
         )
     
+    def on_init_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs) -> TrainerControl:
+        """Called at the end of trainer initialization."""
+        logger.info("=== Early Stopping Initialization ===")
+        logger.info(f"Args: {args}")
+        logger.info(f"State: {state}")
+        logger.info(f"Additional kwargs: {kwargs}")
+        
+        # Store model reference if provided
+        if 'model' in kwargs:
+            self._model = kwargs['model']
+            logger.info(f"Model type stored: {type(self._model)}")
+        
+        # Reset tracking variables
+        self.reset()
+        
+        # Log GRPO-specific configuration if available
+        if hasattr(args, 'grpo_config'):
+            logger.info(f"GRPO config: {args.grpo_config}")
+        
+        return control
+
+    def on_train_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs) -> TrainerControl:
+        """Called at the beginning of training."""
+        logger.info("=== Starting Early Stopping Monitor ===")
+        logger.info(f"Initial state: {state}")
+        self.reset()
+        return control
+
+    def on_step_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs) -> TrainerControl:
+        """Check for early stopping conditions at end of step."""
+        if not self.is_active:
+            return control
+            
+        current_step = state.global_step
+        
+        # Don't stop before minimum steps
+        if current_step < self.min_steps:
+            logger.debug(f"Step {current_step}: Minimum steps not reached")
+            return control
+        
+        # Get current reward from GRPO-specific metrics
+        current_reward = kwargs.get('reward', None)
+        if current_reward is not None:
+            logger.info(f"Step {current_step} - Current reward: {current_reward}")
+            
+            # Check for improvement
+            if self._check_improvement(current_reward):
+                self._best_reward = current_reward
+                self._steps_without_improvement = 0
+                logger.info(f"New best reward: {current_reward:.4f}")
+            else:
+                self._steps_without_improvement += 1
+                logger.info(
+                    f"No improvement for {self._steps_without_improvement} steps "
+                    f"(current: {current_reward:.4f}, best: {self._best_reward:.4f})"
+                )
+            
+            # Check stopping condition
+            if self._steps_without_improvement >= self.patience:
+                logger.info(
+                    f"Stopping early at step {current_step}:\n"
+                    f"  No improvement for {self.patience} steps\n"
+                    f"  Best reward: {self._best_reward:.4f}\n"
+                    f"  Current reward: {current_reward:.4f}"
+                )
+                control.should_training_stop = True
+        
+        return control
+
+    def on_train_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs) -> TrainerControl:
+        """Called at the end of training."""
+        logger.info("=== Early Stopping Summary ===")
+        logger.info(f"Best reward achieved: {self._best_reward:.4f}")
+        logger.info(f"Steps without improvement: {self._steps_without_improvement}")
+        logger.info(f"Total steps: {state.global_step}")
+        
+        # Log GRPO-specific final metrics if available
+        if 'final_metrics' in kwargs:
+            logger.info(f"Final GRPO metrics: {kwargs['final_metrics']}")
+        
+        return control
+
     def reset(self) -> None:
         """Reset early stopping state."""
         self._best_reward = float('-inf')
@@ -67,51 +169,5 @@ class EarlyStoppingCallback(BaseCallback):
             True if reward shows sufficient improvement
         """
         improvement = current_reward - self._best_reward
-        return improvement >= self.min_improvement
-    
-    def _on_step_end(self) -> None:
-        """Check for early stopping conditions at end of step."""
-        if not self.is_active:
-            return
-            
-        current_step = self.trainer.state.current_step
-        current_reward = self.trainer.state.current_reward
-        
-        # Don't stop before minimum steps
-        if current_step < self.min_steps:
-            logger.info(f"Step {current_step}: Minimum steps not reached")
-            return
-        
-        # Check for improvement
-        if self._check_improvement(current_reward):
-            self._best_reward = current_reward
-            self._steps_without_improvement = 0
-            logger.info(
-                f"Step {current_step}: New best reward {current_reward:.4f}"
-            )
-        else:
-            self._steps_without_improvement += 1
-            logger.info(
-                f"Step {current_step}: No improvement for {self._steps_without_improvement} steps"
-                f" (current: {current_reward:.4f}, best: {self._best_reward:.4f})"
-            )
-        
-        # Check stopping condition
-        if self._steps_without_improvement >= self.patience:
-            logger.info(
-                f"Stopping early at step {current_step}:\n"
-                f"  No improvement for {self.patience} steps\n"
-                f"  Best reward: {self._best_reward:.4f}\n"
-                f"  Current reward: {current_reward:.4f}"
-            )
-            self.trainer.stop_training()
-    
-    def _on_training_start(self) -> None:
-        """Reset state at start of training."""
-        self.reset()
-        logger.info("Reset early stopping state at training start")
-    
-    def _on_training_end(self) -> None:
-        """Clean up at end of training."""
-        self.reset()
-        logger.info("Reset early stopping state at training end") 
+        logger.debug(f"Improvement check: {improvement} (threshold: {self.min_improvement})")
+        return improvement >= self.min_improvement 
