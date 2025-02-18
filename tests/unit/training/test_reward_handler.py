@@ -182,4 +182,33 @@ def test_answer_extraction():
 
 def test_reward_caching():
     """Test caching mechanism for reward calculations."""
-    pytest.skip("Not implemented yet") 
+    pytest.skip("Not implemented yet")
+
+def _normalize_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize configuration, ensuring weights sum to 1.0."""
+    logger.debug(f"Input config weights: {config.get('weights', {})}")
+    if "weights" in config:
+        weights = config["weights"]
+        total = sum(weights.values())
+        logger.debug(f"Total weight sum before normalization: {total}")
+        if total != 0:
+            config["weights"] = {k: v/total for k, v in weights.items()}
+            logger.debug(f"Normalized weights: {config['weights']}")
+    return config 
+
+def calculate_format_reward(self, completions: List[Dict[str, str]]) -> List[float]:
+    """Calculate reward for format adherence."""
+    logger.debug(f"Input completions structure: {type(completions)}")
+    logger.debug(f"First completion sample: {completions[0] if completions else None}")
+    
+    rewards = []
+    for completion in completions:
+        try:
+            logger.debug(f"Processing completion: {completion}")
+            text = completion["content"]
+            # ... rest of the method
+        except Exception as e:
+            logger.error(f"Error calculating format reward: {str(e)}")
+            rewards.append(0.0)
+                
+    return rewards 
