@@ -10,6 +10,9 @@ from src.training.callbacks.checkpoint import ModelCheckpointCallback
 from src.training.callbacks.early_stopping import EarlyStoppingCallback
 from typing import Union
 import os
+import inspect
+from packaging import version
+import transformers
 
 logger = get_logger(__name__)
 
@@ -63,6 +66,19 @@ def get_unsloth_version() -> str:
         logger.warning(f"Error getting Unsloth version: {str(e)}")
         return "Unknown"
 
+def verify_compatibility():
+    """Verify version compatibility of key dependencies."""
+    min_transformers = "4.48.0"
+    min_unsloth = "2025.2.12"
+    
+    # Check transformers version
+    current_transformers = transformers.__version__
+    if version.parse(current_transformers) < version.parse(min_transformers):
+        raise ValueError(f"Transformers version {current_transformers} is too old. Minimum required: {min_transformers}")
+    
+    logger.info(f"Transformers version verified: {current_transformers}")
+    return True
+
 def train_model(config_path: Union[str, Path]) -> None:
     """Train the model using the specified configuration.
     
@@ -97,247 +113,58 @@ def train_model(config_path: Union[str, Path]) -> None:
         logger.info(f"Cache dir resolved to: {training_config.paths.cache_dir.resolve() if training_config.paths.cache_dir else 'None'}")
         logger.info("=====================")
         
-        # Enhanced version and dependency logging
-        logger.info("=== Environment Verification ===")
+        # Verify compatibility first
+        verify_compatibility()
+        
+        # Set up environment
+        os.environ['TRUST_REMOTE_CODE'] = '1'
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        
+        # Update base configuration
+        base_model_config = {
+            'device_map': 'auto',
+            'torch_dtype': torch.bfloat16,
+            'low_cpu_mem_usage': True
+        }
+        
+        # Initialize model with enhanced error handling
+        logger.info("=== Model Loading Process ===")
         try:
-            import unsloth
-            import inspect
-            import sys
-            import pkg_resources
+            result = FastLanguageModel.from_pretrained(**base_model_config)
             
-            # Verify Unsloth installation
-            logger.info("=== Unsloth Installation Verification ===")
-            logger.info(f"Unsloth package location: {unsloth.__file__}")
-            logger.info(f"Unsloth package path: {sys.modules['unsloth'].__path__ if hasattr(sys.modules['unsloth'], '__path__') else 'N/A'}")
+            if result is None:
+                raise ValueError("Model initialization failed - explicit None check")
             
-            # Try multiple version detection methods
-            version_info = {
-                'pkg_resources': pkg_resources.working_set.by_key.get('unsloth'),
-                'module_version': getattr(unsloth, 'VERSION', None),
-                'module_dict': {k: v for k, v in unsloth.__dict__.items() if 'version' in k.lower()},
-                'file_path': unsloth.__file__
-            }
-            logger.info(f"Version detection attempts: {version_info}")
+            if isinstance(result, tuple):
+                if len(result) != 2:
+                    raise ValueError(f"Expected (model, tokenizer) tuple, got tuple of length {len(result)}")
+                model, tokenizer = result
+            else:
+                model = result
+                tokenizer = None
             
-            # Verify module structure
-            logger.info("=== Unsloth Module Structure ===")
-            logger.info(f"Available top-level attributes: {[attr for attr in dir(unsloth) if not attr.startswith('_')]}")
-            logger.info(f"Available FastLanguageModel attributes: {[attr for attr in dir(unsloth.FastLanguageModel) if not attr.startswith('_')]}")
+            if model is None:
+                raise ValueError("Model is None after unpacking")
             
-            # Verify patching status
-            logger.info("=== Patching Status ===")
-            patch_status = {
-                'FastLanguageModel_patched': hasattr(unsloth.FastLanguageModel, 'is_patched'),
-                'GRPO_available': 'GRPO' in [attr for attr in dir(unsloth) if not attr.startswith('_')],
-                'patch_functions': [attr for attr in dir(unsloth) if 'patch' in attr.lower()]
-            }
-            logger.info(f"Patch verification: {patch_status}")
+            # Verify model initialization
+            logger.info(f"Model initialized: {type(model)}")
+            logger.info(f"Model parameters: {sum(p.numel() for p in model.parameters())}")
             
-            # Verify model handlers
-            logger.info("=== Model Handler Verification ===")
-            try:
-                handler_info = {
-                    'available_models': [m for m in dir(unsloth.models) if not m.startswith('_')],
-                    'qwen_handlers': [m for m in dir(unsloth.models) if 'qwen' in m.lower()],
-                    'model_classes': inspect.getmembers(unsloth.models, inspect.isclass)
-                }
-                logger.info(f"Handler information: {handler_info}")
-            except Exception as e:
-                logger.error(f"Error checking model handlers: {str(e)}")
-
-            # Verify CUDA setup
-            logger.info("=== CUDA Verification ===")
-            cuda_info = {
-                'cuda_available': torch.cuda.is_available(),
-                'device_count': torch.cuda.device_count() if torch.cuda.is_available() else 0,
-                'current_device': torch.cuda.current_device() if torch.cuda.is_available() else None,
-                'device_name': torch.cuda.get_device_name() if torch.cuda.is_available() else None
-            }
-            logger.info(f"CUDA information: {cuda_info}")
+            # Handle device placement
+            if torch.cuda.is_available():
+                device = torch.device(f'cuda:{torch.cuda.current_device()}')
+                model = model.to(device)
+                logger.info(f"Model moved to device: {device}")
             
-        except Exception as e:
-            logger.error(f"Environment verification failed: {str(e)}")
-            logger.error("Stack trace:", exc_info=True)
-            raise
-
-        # Initialize model with enhanced state verification
-        logger.info("=== Model Initialization ===")
-        try:
-            # Verify Unsloth configuration
-            logger.info("=== Unsloth Configuration Verification ===")
+            return model, tokenizer
             
-            # Get and log version information
-            logger.info("=== Version Information ===")
-            version = get_unsloth_version()
-            logger.info(f"Detected Unsloth version: {version}")
-            
-            # Log available features
-            logger.info("=== Available Features ===")
-            features = {
-                'fast_language_model': hasattr(unsloth, 'FastLanguageModel'),
-                'patch_fast_rl': hasattr(unsloth, 'PatchFastRL'),
-                'models': hasattr(unsloth, 'models'),
-                'optimizations': [m for m in dir(unsloth) if 'fast' in m.lower()]
-            }
-            logger.info(f"Available features: {features}")
-
-            # Verify model configuration
-            from transformers import AutoConfig
-            logger.info("=== Model Configuration Verification ===")
-            base_config = AutoConfig.from_pretrained(
-                training_config.model.name,
-                trust_remote_code=True
-            )
-            logger.info(f"Model architecture: {base_config.architectures if hasattr(base_config, 'architectures') else 'Unknown'}")
-            logger.info(f"Model attributes: {dir(base_config)}")
-            logger.info(f"Available attention methods: {[attr for attr in dir(base_config) if 'attention' in attr.lower()]}")
-
-            # Get base configuration without optimizations
-            base_model_config = {
-                'model_name': training_config.model.name,
-                'trust_remote_code': True,
-                'load_in_4bit': training_config.model.load_in_4bit,
-                'max_seq_length': training_config.model.max_seq_length,
-                'gpu_memory_utilization': training_config.model.gpu_memory_utilization
-            }
-            logger.info(f"Base model configuration: {base_model_config}")
-
-            # Initialize model first without optimizations
-            logger.info("Loading base model...")
-            try:
-                # Log pre-loading state
-                logger.info("=== Pre-Loading State ===")
-                logger.info(f"CUDA memory before loading: {torch.cuda.memory_allocated() / 1024**2:.2f}MB")
-                logger.info(f"Current device: {torch.cuda.current_device() if torch.cuda.is_available() else 'cpu'}")
-                
-                # Add trust_remote_code handling
-                logger.info("Handling remote code execution...")
-                os.environ['TRUST_REMOTE_CODE'] = '1'  # Explicitly set trust
-                
-                # Enhanced model loading with device management
-                logger.info("=== Model Loading Process ===")
-                try:
-                    result = FastLanguageModel.from_pretrained(
-                        **base_model_config
-                    )
-                    logger.info("Initial model loading call completed")
-                except Exception as e:
-                    logger.error(f"Error in FastLanguageModel.from_pretrained: {str(e)}")
-                    raise
-                
-                # Verify result immediately
-                logger.info("=== Model Loading Verification ===")
-                logger.info(f"Result type: {type(result)}")
-                logger.info(f"Result structure: {result if isinstance(result, tuple) else 'Not tuple'}")
-                
-                if result is None:
-                    raise ValueError("Model loading returned None")
-                
-                # Unpack result with verification
-                if isinstance(result, tuple):
-                    model, tokenizer = result
-                    logger.info("Unpacked model and tokenizer from tuple")
-                else:
-                    model = result
-                    tokenizer = None
-                    logger.info("Got model without tokenizer")
-                
-                # Verify model object
-                if model is None:
-                    raise ValueError("Model is None after unpacking")
-                
-                logger.info("=== Model Object Verification ===")
-                logger.info(f"Model type: {type(model)}")
-                logger.info(f"Model attributes: {[attr for attr in dir(model) if not attr.startswith('_')]}")
-                
-                # Verify model parameters exist
-                try:
-                    param_count = sum(p.numel() for p in model.parameters())
-                    logger.info(f"Model parameter count: {param_count}")
-                except Exception as e:
-                    logger.error(f"Error accessing model parameters: {str(e)}")
-                    raise ValueError("Model parameters not accessible")
-                
-                # Device management with verification
-                if torch.cuda.is_available():
-                    logger.info("=== CUDA Device Management ===")
-                    current_device = torch.cuda.current_device()
-                    logger.info(f"Current CUDA device: {current_device}")
-                    logger.info(f"Memory before move: {torch.cuda.memory_allocated() / 1024**2:.2f}MB")
-                    
-                    try:
-                        model = model.cuda()
-                        logger.info("Model moved to CUDA")
-                        device = next(model.parameters()).device
-                        logger.info(f"Model device verified: {device}")
-                    except Exception as e:
-                        logger.error(f"Error moving model to CUDA: {str(e)}")
-                        raise
-
-                # Apply GRPO patch with enhanced verification
-                logger.info("=== GRPO Patch Verification ===")
-                try:
-                    # Verify model is ready for patching
-                    if not hasattr(model, 'parameters'):
-                        raise ValueError("Model not properly initialized for patching")
-                    
-                    # Store pre-patch state
-                    pre_patch_methods = set(dir(model))
-                    pre_patch_params = sum(p.numel() for p in model.parameters())
-                    logger.info(f"Pre-patch parameter count: {pre_patch_params}")
-                    logger.info(f"Pre-patch training methods: {[m for m in pre_patch_methods if 'train' in m.lower()]}")
-                    
-                    # Apply patch with verification
-                    logger.info("Applying GRPO patch...")
-                    try:
-                        PatchFastRL("GRPO", FastLanguageModel)
-                        logger.info("GRPO patch call completed")
-                    except Exception as e:
-                        logger.error(f"Error in PatchFastRL call: {str(e)}")
-                        raise
-                    
-                    # Verify patch effects
-                    post_patch_methods = set(dir(model))
-                    post_patch_params = sum(p.numel() for p in model.parameters())
-                    new_methods = post_patch_methods - pre_patch_methods
-                    
-                    logger.info("=== Patch Effect Verification ===")
-                    logger.info(f"New methods added: {new_methods}")
-                    logger.info(f"Parameter count change: {post_patch_params - pre_patch_params}")
-                    logger.info(f"Training methods after patch: {[m for m in post_patch_methods if 'train' in m.lower()]}")
-                    
-                    # Verify GRPO-specific attributes
-                    grpo_attributes = {
-                        'has_grpo_methods': any('grpo' in m.lower() for m in dir(model)),
-                        'is_patched': hasattr(model, 'is_patched'),
-                        'has_reward_model': hasattr(model, 'compute_reward')
-                    }
-                    logger.info(f"GRPO attributes verification: {grpo_attributes}")
-                    
-                except Exception as e:
-                    logger.error(f"GRPO patching failed: {str(e)}")
-                    logger.error("=== Patching Error Context ===")
-                    logger.error(f"Model state: {type(model)}")
-                    logger.error(f"Available methods: {[m for m in dir(model) if not m.startswith('_')]}")
-                    raise
-
-                return model, tokenizer
-
-            except Exception as e:
-                logger.error(f"Model loading failed: {str(e)}")
-                logger.error("Stack trace:", exc_info=True)
-                
-                # Additional error context
-                logger.error("=== Error Context ===")
-                if torch.cuda.is_available():
-                    logger.error(f"CUDA memory at error: {torch.cuda.memory_allocated() / 1024**2:.2f}MB")
-                logger.error(f"Base config used: {base_model_config}")
-                
-                raise
-
         except Exception as e:
             logger.error(f"Model initialization failed: {str(e)}")
-            logger.error("Stack trace:", exc_info=True)
+            logger.error("=== Error Context ===")
+            logger.error(f"Base config: {base_model_config}")
+            logger.error(f"CUDA state: {torch.cuda.is_available()}")
+            logger.error(f"Memory state: {torch.cuda.memory_allocated() / 1024**2:.2f}MB")
             raise
 
         # Initialize trainer with verified model
