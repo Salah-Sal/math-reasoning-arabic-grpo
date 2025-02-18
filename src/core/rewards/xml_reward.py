@@ -1,4 +1,5 @@
 from typing import List, Dict, Any
+import re
 from src.core.rewards.base import BaseReward
 from src.infrastructure.logging import get_logger
 
@@ -16,33 +17,27 @@ class ArabicXMLReward(BaseReward):
         },
         "penalties": {
             "extra_content": 0.001,  # Penalty per character after closing tags
+            "multiple_tags": 0.05,   # Penalty for duplicate tags
         }
     }
 
     def __init__(self, config: Dict[str, Any] = None):
-        """Initialize with configuration.
-        
-        Args:
-            config: Configuration dictionary, will be merged with DEFAULT_CONFIG
-        """
-        merged_config = self.DEFAULT_CONFIG.copy()
-        if config:
-            # Log the merging process
-            logger.debug(f"Original config: {merged_config}")
-            logger.debug(f"Custom config: {config}")
-            merged_config.update(config)
-            logger.debug(f"Merged config: {merged_config}")
-        self.config = merged_config
+        """Initialize with configuration."""
+        self.config = self._merge_configs(self.DEFAULT_CONFIG, config or {})
+        logger.debug(f"Initialized with config: {self.config}")
+
+    def _merge_configs(self, default: Dict, custom: Dict) -> Dict:
+        """Deep merge configuration dictionaries."""
+        merged = default.copy()
+        for key, value in custom.items():
+            if isinstance(value, dict) and key in merged and isinstance(merged[key], dict):
+                merged[key] = self._merge_configs(merged[key], value)
+            else:
+                merged[key] = value
+        return merged
 
     def calculate(self, completions: List[Dict[str, Any]]) -> List[float]:
-        """Calculate rewards for a list of completions.
-        
-        Args:
-            completions: List of completion dictionaries with 'content' key
-            
-        Returns:
-            List of reward values between 0 and 1
-        """
+        """Calculate rewards for a list of completions."""
         try:
             if not self.validate_input(completions):
                 logger.error("Invalid input format")
@@ -52,7 +47,7 @@ class ArabicXMLReward(BaseReward):
             for completion in completions:
                 reward = self._calculate_single_reward(completion["content"])
                 rewards.append(reward)
-                logger.debug(f"Calculated reward {reward} for completion")
+                self.log_reward_calculation(completion, reward)
             
             return rewards
             
@@ -67,45 +62,53 @@ class ArabicXMLReward(BaseReward):
             weights = self.config["tag_weights"]
             penalties = self.config["penalties"]
 
-            # Add detailed logging
-            logger.debug("Starting reward calculation for text:")
-            logger.debug(f"Text length: {len(text)}")
-            logger.debug(f"Raw text: {repr(text)}")  # Show explicit newlines
-            
-            # Log tag counts with different matching methods
-            strict_counts = {
-                "thinking_start": text.count("<تفكير>\n"),
-                "thinking_end": text.count("\n</تفكير>\n"),
-                "answer_start": text.count("<الجواب>\n"),
-                "answer_end": text.count("\n</الجواب>\n")
+            logger.debug("=== Starting reward calculation ===")
+            logger.debug(f"Input text: {repr(text)}")
+
+            # Define tag patterns with flexible whitespace
+            patterns = {
+                "thinking_start": r"<تفكير>\s*",
+                "thinking_end": r"\s*</تفكير>\s*",
+                "answer_start": r"<الجواب>\s*",
+                "answer_end": r"\s*</الجواب>\s*"
             }
-            logger.debug(f"Strict tag counts (with newlines): {strict_counts}")
-            
-            loose_counts = {
-                "thinking_start": text.count("<تفكير>"),
-                "thinking_end": text.count("</تفكير>"),
-                "answer_start": text.count("<الجواب>"),
-                "answer_end": text.count("</الجواب>")
+
+            # Find all tag matches
+            tag_matches = {
+                tag: list(re.finditer(pattern, text))
+                for tag, pattern in patterns.items()
             }
-            logger.debug(f"Loose tag counts (without newlines): {loose_counts}")
-            
-            # Calculate rewards based on tag presence
-            for tag, weight in weights.items():
-                logger.debug(f"Processing tag {tag} with weight {weight}")
-                if strict_counts[tag] == 1:
-                    reward += weight
-                    logger.debug(f"Added weight {weight} for {tag}, current reward: {reward}")
-            
-            # Apply penalties for multiple tags or missing tags
-            for tag, count in strict_counts.items():
-                if count > 1:
-                    penalty = (count - 1) * penalties["extra_content"]
+
+            logger.debug(f"Found tag matches: {[(k, len(v)) for k, v in tag_matches.items()]}")
+
+            # Calculate base reward for correct tag presence
+            for tag, matches in tag_matches.items():
+                match_count = len(matches)
+                if match_count == 1:
+                    reward += weights[tag]
+                    logger.debug(f"Added weight {weights[tag]} for {tag}")
+                elif match_count > 1:
+                    penalty = (match_count - 1) * penalties["multiple_tags"]
                     reward -= penalty
-                    logger.debug(f"Applied penalty {penalty} for multiple {tag}, current reward: {reward}")
+                    logger.debug(f"Applied penalty {penalty} for multiple {tag}")
+
+            # Check for extra content after final tag
+            last_tag_pos = max(
+                (m.end() for matches in tag_matches.values() for m in matches),
+                default=0
+            )
+            extra_content = text[last_tag_pos:].strip()
+            if extra_content:
+                penalty = len(extra_content) * penalties["extra_content"]
+                reward -= penalty
+                logger.debug(f"Applied extra content penalty: {penalty} for {len(extra_content)} chars")
+
+            # Normalize final reward
+            final_reward = max(0.0, min(1.0, reward))
+            logger.debug(f"Final reward (raw={reward}, normalized={final_reward})")
             
-            logger.debug(f"Final calculated reward: {reward}")
-            return max(0.0, min(1.0, reward))  # Ensure reward is between 0 and 1
-            
+            return final_reward
+
         except Exception as e:
-            logger.error(f"Error in _calculate_single_reward: {str(e)}")
+            logger.error(f"Error in reward calculation: {str(e)}")
             return 0.0 
