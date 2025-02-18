@@ -26,13 +26,9 @@ class RewardHandler:
         Args:
             config: Optional configuration dictionary to override defaults
         """
-        if config is None:
-            # Only normalize default config
-            self.config = self._normalize_config(self.DEFAULT_CONFIG.copy())
-        else:
-            # Keep custom config as-is
-            self.config = config.copy()
-        
+        # Deep copy to prevent mutations
+        base_config = config.copy() if config else self.DEFAULT_CONFIG.copy()
+        self.config = self._normalize_config(base_config)
         logger.debug(f"Initialized RewardHandler with config: {self.config}")
 
     def _normalize_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
@@ -40,11 +36,19 @@ class RewardHandler:
         if "weights" in config:
             weights = config["weights"]
             total = sum(weights.values())
-            logger.debug(f"Default config weights before normalization: {weights}, total: {total}")
+            logger.debug(f"Normalizing weights: {weights}, total: {total}")
             
+            # Always normalize to ensure sum is 1.0
             if abs(total - 1.0) > 1e-6:
+                # Store original proportions for logging
+                original = weights.copy()
                 config["weights"] = {k: v/total for k, v in weights.items()}
-                logger.debug(f"Normalized default weights to: {config['weights']}")
+                logger.debug(f"Normalized weights from {original} to {config['weights']}")
+                
+                # Verify normalization
+                new_total = sum(config["weights"].values())
+                logger.debug(f"New total after normalization: {new_total}")
+                assert abs(new_total - 1.0) < 1e-6, f"Normalization failed: {new_total}"
         
         return config
 
