@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch, MagicMock
 from datasets import Dataset
 from transformers import PreTrainedTokenizer
 from src.training.monitoring import TrainingMonitor
+from datetime import datetime
 
 @pytest.fixture
 def temp_log_dir(tmp_path):
@@ -121,7 +122,7 @@ def test_on_training_start(monitor, caplog):
         per_device_train_batch_size=8,
         max_steps=1000
     )
-    monitor.trainer = mock_trainer
+    monitor.bind_trainer(mock_trainer)
     
     with caplog.at_level(logging.INFO):
         monitor._on_training_start()
@@ -151,7 +152,7 @@ def test_on_step_end(monitor, caplog):
 
 def test_on_training_end(monitor, caplog):
     """Test training end logging."""
-    monitor.start_time = monitor.start_time or pytest.approx(monitor.start_time)
+    monitor.start_time = datetime.now()
     monitor.training_steps = 100
     monitor.best_reward = 0.95
     

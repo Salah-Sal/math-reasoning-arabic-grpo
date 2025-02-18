@@ -56,20 +56,29 @@ class TrainingMonitor(BaseCallback):
     def log_model_info(self, model):
         """Log model information including architecture and memory usage."""
         self.logger.info("=== Model Information ===")
+        
+        if model is None:
+            self.logger.error("Cannot log model info: model is None")
+            self.logger.info("========================")
+            return
+        
         self.logger.info(f"Model Type: {type(model).__name__}")
         
-        # Get total parameters
-        total_params = sum(p.numel() for p in model.parameters())
-        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        
-        self.logger.info(f"Total Parameters: {total_params:,}")
-        self.logger.info(f"Trainable Parameters: {trainable_params:,}")
-        
-        if torch.cuda.is_available():
-            memory_allocated = torch.cuda.memory_allocated() / 1e9
-            memory_reserved = torch.cuda.memory_reserved() / 1e9
-            self.logger.info(f"GPU Memory Allocated: {memory_allocated:.2f} GB")
-            self.logger.info(f"GPU Memory Reserved: {memory_reserved:.2f} GB")
+        try:
+            # Get total parameters
+            total_params = sum(p.numel() for p in model.parameters())
+            trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+            
+            self.logger.info(f"Total Parameters: {total_params:,}")
+            self.logger.info(f"Trainable Parameters: {trainable_params:,}")
+            
+            if torch.cuda.is_available():
+                memory_allocated = torch.cuda.memory_allocated() / 1e9
+                memory_reserved = torch.cuda.memory_reserved() / 1e9
+                self.logger.info(f"GPU Memory Allocated: {memory_allocated:.2f} GB")
+                self.logger.info(f"GPU Memory Reserved: {memory_reserved:.2f} GB")
+        except Exception as e:
+            self.logger.error(f"Error getting model information: {str(e)}")
         
         self.logger.info("========================")
     
