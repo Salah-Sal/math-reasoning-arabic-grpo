@@ -76,12 +76,18 @@ def train_model(config_path: Union[str, Path]) -> None:
             
             # Step 2: Verify PEFT configuration
             logger.info("Step 2: Verifying PEFT configuration")
+            use_gradient_checkpointing = training_config.memory.use_gradient_checkpointing
+            logger.info(f"Gradient checkpointing setting: {use_gradient_checkpointing} (type: {type(use_gradient_checkpointing)})")
+            
             peft_config = {
                 'r': training_config.model.lora_rank,
                 'target_modules': training_config.model.target_modules,
                 'lora_alpha': training_config.model.lora_alpha,
                 'lora_dropout': training_config.model.lora_dropout,
-                'use_gradient_checkpointing': training_config.memory.use_gradient_checkpointing
+                'use_gradient_checkpointing': (
+                    True if use_gradient_checkpointing == "unsloth" 
+                    else use_gradient_checkpointing
+                )
             }
             logger.info(f"PEFT configuration: {peft_config}")
             

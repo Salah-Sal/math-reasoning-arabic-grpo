@@ -33,7 +33,7 @@ training:
 
 memory:
   gpu_memory_utilization: 0.7
-  use_gradient_checkpointing: "unsloth"  # Special value for Unsloth's implementation
+  use_gradient_checkpointing: "unsloth"  # Changed to match Unsloth's expectations
   optimize_memory_use: true
   max_memory_MB: 8000
   dtype: "float16"
