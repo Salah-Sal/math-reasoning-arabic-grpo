@@ -168,29 +168,82 @@ def train_model(config_path: Union[str, Path]) -> None:
             PatchFastRL("GRPO", FastLanguageModel)
             logger.info("Patches applied successfully")
             
+            # Log Unsloth model chain
+            logger.info("=== Model Loading Chain ===")
+            logger.info(f"Initial loader: FastLanguageModel")
+            logger.info(f"Qwen2 adapter available: {hasattr(unsloth.models, 'qwen2')}")
+            logger.info(f"Llama adapter available: {hasattr(unsloth.models, 'llama')}")
+            
+            # Remove torch_dtype from base config as it's handled by Unsloth
+            model_config = base_model_config.copy()
+            if 'torch_dtype' in model_config:
+                dtype = model_config.pop('torch_dtype')
+                logger.info(f"Removed torch_dtype ({dtype}) from explicit config")
+            
+            # Prepare Qwen-specific configuration
+            if 'qwen' in model_name:
+                logger.info("=== Qwen Model Configuration ===")
+                # Remove potentially conflicting parameters
+                for param in ['use_flash_attention', 'use_memory_efficient_attention']:
+                    if param in model_config:
+                        removed_val = model_config.pop(param)
+                        logger.info(f"Removed {param} ({removed_val}) to prevent conflicts")
+                
+                # Add Qwen-specific parameters
+                model_config.update({
+                    'trust_remote_code': True,
+                    'use_fast_tokenizer': True
+                })
+                logger.info(f"Final Qwen configuration: {model_config}")
+            
             # Memory check before loading
             if torch.cuda.is_available():
                 logger.info(f"Pre-load CUDA Memory: {torch.cuda.memory_allocated() / 1024**2:.2f}MB")
             
-            # Try loading model
-            logger.info(f"Loading model with configuration: {base_model_config}")
-            result = FastLanguageModel.from_pretrained(**base_model_config)
+            # Try loading model with cleaned configuration
+            logger.info("=== Model Loading Attempt ===")
+            logger.info(f"Using configuration: {model_config}")
+            
+            # First try loading tokenizer separately
+            logger.info("Loading tokenizer...")
+            from transformers import AutoTokenizer
+            tokenizer = AutoTokenizer.from_pretrained(
+                model_config['model_name'],
+                trust_remote_code=True,
+                use_fast=True
+            )
+            logger.info("Tokenizer loaded successfully")
+            
+            # Then load model
+            logger.info("Loading model...")
+            result = FastLanguageModel.from_pretrained(
+                **model_config,
+                tokenizer=tokenizer  # Pass existing tokenizer
+            )
             
             # Verify loaded model
             if result is not None:
-                model, tokenizer = result
+                model = result[0] if isinstance(result, tuple) else result
                 logger.info(f"Model loaded successfully. Type: {type(model)}")
                 logger.info(f"Model parameters: {sum(p.numel() for p in model.parameters())}")
                 logger.info(f"Model device: {next(model.parameters()).device}")
+                logger.info(f"Model config type: {type(getattr(model, 'config', None))}")
+                
+                # Verify model capabilities
+                logger.info("=== Model Capabilities ===")
+                logger.info(f"Has attention mask: {hasattr(model, 'get_attention_mask')}")
+                logger.info(f"Has position IDs: {hasattr(model, 'get_position_ids')}")
+                logger.info(f"Supports gradient checkpointing: {hasattr(model, 'gradient_checkpointing_enable')}")
+                
+                return (model, tokenizer)
             else:
                 raise ValueError("Model loading returned None")
                 
-            return model, tokenizer
-            
         except Exception as e:
             logger.error(f"Model initialization failed: {str(e)}")
             logger.error("=== Error Context ===")
-            logger.error(f"Base config: {base_model_config}")
+            logger.error(f"Model loading chain trace:", exc_info=True)
+            logger.error(f"Configuration used: {model_config}")
             logger.error(f"CUDA state: {torch.cuda.is_available()}")
             logger.error(f"Memory state: {torch.cuda.memory_allocated() / 1024**2:.2f}MB")
             logger.error(f"Unsloth state: {dir(unsloth) if 'unsloth' in locals() else 'Not imported'}")
