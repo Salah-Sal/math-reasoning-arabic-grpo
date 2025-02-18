@@ -71,51 +71,40 @@ class ArabicXMLReward(BaseReward):
         weights = self.config["tag_weights"]
         penalties = self.config["penalties"]
 
-        try:
-            # Log input text with explicit newlines for debugging
-            logger.debug("Processing text with explicit newlines:")
-            logger.debug(repr(text))
-            
-            # Track all tag positions for debugging
-            tag_positions = {
-                "thinking_start": [i for i in range(len(text)) if text.startswith("<تفكير>", i)],
-                "thinking_end": [i for i in range(len(text)) if text.startswith("</تفكير>", i)],
-                "answer_start": [i for i in range(len(text)) if text.startswith("<الجواب>", i)],
-                "answer_end": [i for i in range(len(text)) if text.startswith("</الجواب>", i)]
-            }
-            logger.debug(f"Tag positions in text: {tag_positions}")
-            
-            # Check thinking section tags with detailed logging
-            thinking_start_count = text.count("<تفكير>\n")
-            thinking_end_count = text.count("\n</تفكير>\n")
-            logger.debug(f"Thinking tag counts - strict (with newlines): start={thinking_start_count}, end={thinking_end_count}")
-            logger.debug(f"Thinking tag counts - loose: start={text.count('<تفكير>')}, end={text.count('</تفكير>')}")
-            
-            if thinking_start_count == 1:
-                reward += weights["thinking_start"]
-                logger.debug(f"Added thinking_start weight: +{weights['thinking_start']} -> reward={reward}")
-            if thinking_end_count == 1:
-                reward += weights["thinking_end"]
-                logger.debug(f"Added thinking_end weight: +{weights['thinking_end']} -> reward={reward}")
-
-            # Check answer section tags with detailed logging
-            answer_start_count = text.count("\n<الجواب>\n")
-            answer_end_count = text.count("\n</الجواب>")
-            logger.debug(f"Answer tag counts - strict (with newlines): start={answer_start_count}, end={answer_end_count}")
-            logger.debug(f"Answer tag counts - loose: start={text.count('<الجواب>')}, end={text.count('</الجواب>')}")
-            
-            # Track all content splits for debugging
-            content_splits = {
-                "answer_split_1": text.split("\n</الجواب>\n"),
-                "answer_split_2": text.split("\n</الجواب>"),
-                "raw_splits": [s.strip() for s in text.split("\n")]
-            }
-            logger.debug(f"Content splits: {content_splits}")
-            
-            if answer_start_count == 1:
-                reward += weights["answer_start"]
-                logger.debug(f"Added answer_start weight: +{weights['answer_start']} -> reward={reward}")
-                
+        # Add detailed logging
+        logger.debug("Starting reward calculation for text:")
+        logger.debug(f"Text length: {len(text)}")
+        logger.debug(f"Raw text: {repr(text)}")  # Show explicit newlines
+        
+        # Log tag counts with different matching methods
+        strict_counts = {
+            "thinking_start": text.count("<تفكير>\n"),
+            "thinking_end": text.count("\n</تفكير>\n"),
+            "answer_start": text.count("<الجواب>\n"),
+            "answer_end": text.count("\n</الجواب>\n")
+        }
+        logger.debug(f"Strict tag counts (with newlines): {strict_counts}")
+        
+        loose_counts = {
+            "thinking_start": text.count("<تفكير>"),
+            "thinking_end": text.count("</تفكير>"),
+            "answer_start": text.count("<الجواب>"),
+            "answer_end": text.count("</الجواب>")
+        }
+        logger.debug(f"Loose tag counts (without newlines): {loose_counts}")
+        
+        # Log each reward addition
+        for tag, weight in weights.items():
+            logger.debug(f"Processing tag {tag} with weight {weight}")
+            if tag == "thinking_start" and strict_counts[tag] == 1:
+                reward += weight
+                logger.debug(f"Added thinking_start weight: +{weight} -> reward={reward}")
+            elif tag == "thinking_end" and strict_counts[tag] == 1:
+                reward += weight
+                logger.debug(f"Added thinking_end weight: +{weight} -> reward={reward}")
+            elif tag == "answer_start" and strict_counts[tag] == 1:
+                reward += weight
+                logger.debug(f"Added answer_start weight: +{weight} -> reward={reward}")
                 # First extra content check
                 extra_content_1 = text.split("\n</الجواب>\n")[-1]
                 logger.debug(f"First extra content check: '{repr(extra_content_1)}'")
@@ -124,11 +113,9 @@ class ArabicXMLReward(BaseReward):
                     logger.debug(f"First penalty calculation: len={len(extra_content_1)} * {penalties['extra_content']} = {penalty_1}")
                     reward -= penalty_1
                     logger.debug(f"After first penalty: reward={reward}")
-                    
-            if answer_end_count == 1:
-                reward += weights["answer_end"]
-                logger.debug(f"Added answer_end weight: +{weights['answer_end']} -> reward={reward}")
-                
+            elif tag == "answer_end" and strict_counts[tag] == 1:
+                reward += weight
+                logger.debug(f"Added answer_end weight: +{weight} -> reward={reward}")
                 # Second extra content check
                 extra_content_2 = text.split("\n</الجواب>")[-1]
                 logger.debug(f"Second extra content check: '{repr(extra_content_2)}'")
@@ -137,11 +124,13 @@ class ArabicXMLReward(BaseReward):
                     logger.debug(f"Second penalty calculation: (len={len(extra_content_2)}-1) * {penalties['extra_content']} = {penalty_2}")
                     reward -= penalty_2
                     logger.debug(f"After second penalty: reward={reward}")
-
-            logger.debug(f"Final raw reward: {reward}")
-            normalized = self.normalize_reward(reward)
-            logger.debug(f"Normalized reward: {normalized}")
-            return normalized
+            logger.debug(f"Current reward after {tag}: {reward}")
+        
+        # Log final reward before returning
+        logger.debug(f"Final calculated reward: {reward}")
+        normalized = self.normalize_reward(reward)
+        logger.debug(f"Normalized reward: {normalized}")
+        return normalized
 
         except Exception as e:
             logger.error(f"Error in reward calculation: {str(e)}")
