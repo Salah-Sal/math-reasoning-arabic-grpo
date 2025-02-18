@@ -70,11 +70,6 @@ class ArabicXMLReward(BaseReward):
             logger.debug("=== Starting reward calculation ===")
             logger.debug(f"Input text: {repr(text)}")
 
-            # Validate basic tag structure first
-            if not self._validate_tag_structure(text):
-                logger.debug("Invalid tag structure detected")
-                return 0.0
-
             # Define tag patterns with strict matching
             patterns = {
                 "thinking_start": r"<تفكير>\s*",
@@ -91,12 +86,7 @@ class ArabicXMLReward(BaseReward):
 
             logger.debug(f"Found tag matches: {[(k, len(v)) for k, v in tag_matches.items()]}")
 
-            # Validate tag ordering and completeness
-            if not self._validate_tag_ordering(tag_matches):
-                logger.debug("Invalid tag ordering detected")
-                return 0.0
-
-            # Calculate base reward for correct tag presence
+            # Calculate reward for each tag present
             for tag, matches in tag_matches.items():
                 match_count = len(matches)
                 if match_count == 1:
@@ -108,15 +98,22 @@ class ArabicXMLReward(BaseReward):
                     logger.debug(f"Applied penalty {penalty} for multiple {tag}")
 
             # Check for extra content after final tag
-            last_tag_pos = max(
-                (m.end() for matches in tag_matches.values() for m in matches),
-                default=0
-            )
-            extra_content = text[last_tag_pos:].strip()
-            if extra_content:
-                penalty = len(extra_content) * penalties["extra_content"]
-                reward -= penalty
-                logger.debug(f"Applied extra content penalty: {penalty} for {len(extra_content)} chars")
+            if any(matches for matches in tag_matches.values()):
+                last_tag_pos = max(
+                    (m.end() for matches in tag_matches.values() for m in matches),
+                    default=0
+                )
+                extra_content = text[last_tag_pos:].strip()
+                if extra_content:
+                    penalty = len(extra_content) * penalties["extra_content"]
+                    reward -= penalty
+                    logger.debug(f"Applied extra content penalty: {penalty} for {len(extra_content)} chars")
+
+            # Validate tag ordering only if all tags are present
+            if all(len(matches) == 1 for matches in tag_matches.values()):
+                if not self._validate_tag_ordering(tag_matches):
+                    logger.debug("Invalid tag ordering detected")
+                    reward = 0.0
 
             # Normalize final reward
             final_reward = max(0.0, min(1.0, reward))
@@ -128,33 +125,17 @@ class ArabicXMLReward(BaseReward):
             logger.error(f"Error in reward calculation: {str(e)}")
             return 0.0
 
-    def _validate_tag_structure(self, text: str) -> bool:
-        """Validate basic XML tag structure."""
-        # Check for matching opening/closing tags
-        if text.count("<تفكير>") != text.count("</تفكير>"):
-            return False
-        if text.count("<الجواب>") != text.count("</الجواب>"):
-            return False
-        
-        # Check for complete tag pairs
-        if not (text.count("<تفكير>") >= 1 and text.count("</تفكير>") >= 1):
-            return False
-        if not (text.count("<الجواب>") >= 1 and text.count("</الجواب>") >= 1):
-            return False
-        
-        return True
-
     def _validate_tag_ordering(self, tag_matches: Dict[str, List[re.Match]]) -> bool:
         """Validate the ordering of tags."""
-        # All tags should appear exactly once
-        if not all(len(matches) == 1 for matches in tag_matches.values()):
-            return False
-        
-        # Get positions of all tags
-        thinking_start = tag_matches["thinking_start"][0].start()
-        thinking_end = tag_matches["thinking_end"][0].start()
-        answer_start = tag_matches["answer_start"][0].start()
-        answer_end = tag_matches["answer_end"][0].start()
-        
-        # Validate ordering
-        return (thinking_start < thinking_end < answer_start < answer_end) 
+        try:
+            # Get positions of all tags
+            thinking_start = tag_matches["thinking_start"][0].start()
+            thinking_end = tag_matches["thinking_end"][0].start()
+            answer_start = tag_matches["answer_start"][0].start()
+            answer_end = tag_matches["answer_end"][0].start()
+            
+            # Validate ordering
+            return (thinking_start < thinking_end < answer_start < answer_end)
+        except (IndexError, KeyError) as e:
+            logger.debug(f"Tag ordering validation failed: {str(e)}")
+            return False 
