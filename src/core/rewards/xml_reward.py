@@ -63,6 +63,11 @@ class ArabicXMLReward(BaseReward):
     def _calculate_single_reward(self, text: str) -> float:
         """Calculate reward for a single completion."""
         try:
+            # First validate complete tag structure
+            if not self._validate_complete_structure(text):
+                logger.debug("Invalid or incomplete tag structure")
+                return 0.0
+
             reward = 0.0
             weights = self.config["tag_weights"]
             penalties = self.config["penalties"]
@@ -124,6 +129,24 @@ class ArabicXMLReward(BaseReward):
         except Exception as e:
             logger.error(f"Error in reward calculation: {str(e)}")
             return 0.0
+
+    def _validate_complete_structure(self, text: str) -> bool:
+        """Validate that all tags are properly paired and ordered."""
+        # Check for complete tag pairs
+        if not all([
+            text.count("<تفكير>") == text.count("</تفكير>"),
+            text.count("<الجواب>") == text.count("</الجواب>")
+        ]):
+            logger.debug("Mismatched tag pairs")
+            return False
+
+        # Validate proper tag ordering using regex
+        pattern = r"<تفكير>.*?</تفكير>.*?<الجواب>.*?</الجواب>"
+        if not re.match(pattern, text, re.DOTALL):
+            logger.debug("Invalid tag ordering")
+            return False
+
+        return True
 
     def _validate_tag_ordering(self, tag_matches: Dict[str, List[re.Match]]) -> bool:
         """Validate the ordering of tags."""
