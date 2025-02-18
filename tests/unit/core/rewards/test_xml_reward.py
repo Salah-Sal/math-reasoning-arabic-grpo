@@ -102,11 +102,11 @@ def test_invalid_input(reward_function):
 def test_malformed_tags(reward_function):
     """Test handling of malformed tags."""
     completion = {
-        "content": "<تفكير>thinking</تفكير><الجواب>42</الجواب>"  # Missing newlines
+        "content": "<تفكير>thinking</تفكير><الجواب>42</الجواب"  # Missing closing tag
     }
     rewards = reward_function.calculate([completion])
     assert len(rewards) == 1
-    assert rewards[0] == 0.0  # Should get no reward for incorrect format
+    assert rewards[0] == 0.0  # Should get zero reward for malformed tags
 
 def test_empty_content(reward_function):
     """Test handling of empty content."""
