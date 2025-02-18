@@ -31,17 +31,20 @@ class RewardHandler:
 
     def _normalize_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """Normalize configuration, ensuring weights sum to 1.0."""
-        logger.debug(f"Input config weights: {config.get('weights', {})}")
         if "weights" in config:
             weights = config["weights"]
             total = sum(weights.values())
-            logger.debug(f"Total weight sum before normalization: {total}")
+            logger.debug(f"Processing weights: {weights} with total {total}")
             
-            # Only normalize if total is significantly different from 1.0
-            # AND if we're using the default config (not a custom one)
-            if abs(total - 1.0) > 1e-6 and config is self.DEFAULT_CONFIG:
+            if abs(total - 1.0) > 1e-6:
                 config["weights"] = {k: v/total for k, v in weights.items()}
-                logger.debug(f"Normalized weights: {config['weights']}")
+                logger.debug(f"Normalized weights to: {config['weights']}")
+                
+                # Verify normalization
+                new_total = sum(config["weights"].values())
+                logger.debug(f"Post-normalization total: {new_total}")
+                assert abs(new_total - 1.0) < 1e-6, f"Weights did not normalize correctly: {new_total}"
+        
         return config
 
     def calculate_rewards(self, completions: List[Dict[str, str]], expected_answer: str) -> List[float]:
