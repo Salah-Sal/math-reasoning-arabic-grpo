@@ -54,31 +54,63 @@ def train_model(config_path: Union[str, Path]) -> None:
         try:
             import unsloth
             import inspect
-            import torch
-            from transformers import AutoConfig
+            import sys
+            import pkg_resources
             
-            # Verify Unsloth and model setup
+            # Verify Unsloth installation
+            logger.info("=== Unsloth Installation Verification ===")
             logger.info(f"Unsloth package location: {unsloth.__file__}")
-            logger.info(f"CUDA available: {torch.cuda.is_available()}")
+            logger.info(f"Unsloth package path: {sys.modules['unsloth'].__path__ if hasattr(sys.modules['unsloth'], '__path__') else 'N/A'}")
             
-            # Verify Qwen2 configuration
-            logger.info("=== Qwen2 Configuration Verification ===")
+            # Try multiple version detection methods
+            version_info = {
+                'pkg_resources': pkg_resources.working_set.by_key.get('unsloth'),
+                'module_version': getattr(unsloth, 'VERSION', None),
+                'module_dict': {k: v for k, v in unsloth.__dict__.items() if 'version' in k.lower()},
+                'file_path': unsloth.__file__
+            }
+            logger.info(f"Version detection attempts: {version_info}")
+            
+            # Verify module structure
+            logger.info("=== Unsloth Module Structure ===")
+            logger.info(f"Available top-level attributes: {[attr for attr in dir(unsloth) if not attr.startswith('_')]}")
+            logger.info(f"Available FastLanguageModel attributes: {[attr for attr in dir(unsloth.FastLanguageModel) if not attr.startswith('_')]}")
+            
+            # Verify patching status
+            logger.info("=== Patching Status ===")
+            patch_status = {
+                'FastLanguageModel_patched': hasattr(unsloth.FastLanguageModel, 'is_patched'),
+                'GRPO_available': 'GRPO' in [attr for attr in dir(unsloth) if not attr.startswith('_')],
+                'patch_functions': [attr for attr in dir(unsloth) if 'patch' in attr.lower()]
+            }
+            logger.info(f"Patch verification: {patch_status}")
+            
+            # Verify model handlers
+            logger.info("=== Model Handler Verification ===")
             try:
-                base_config = AutoConfig.from_pretrained(training_config.model.name)
-                logger.info(f"Base model config type: {type(base_config)}")
-                logger.info(f"Base model config attributes: {dir(base_config)}")
-                logger.info(f"Flash attention support: {getattr(base_config, 'use_flash_attention', None)}")
+                handler_info = {
+                    'available_models': [m for m in dir(unsloth.models) if not m.startswith('_')],
+                    'qwen_handlers': [m for m in dir(unsloth.models) if 'qwen' in m.lower()],
+                    'model_classes': inspect.getmembers(unsloth.models, inspect.isclass)
+                }
+                logger.info(f"Handler information: {handler_info}")
             except Exception as e:
-                logger.error(f"Error loading base config: {str(e)}")
-            
-            # Verify Unsloth model handling
-            logger.info("=== Unsloth Model Handling ===")
-            logger.info(f"Available model types: {[m for m in dir(unsloth.models) if not m.startswith('_')]}")
-            logger.info(f"Qwen2 specific handlers: {[m for m in dir(unsloth.models) if 'qwen' in m.lower()]}")
+                logger.error(f"Error checking model handlers: {str(e)}")
+
+            # Verify CUDA setup
+            logger.info("=== CUDA Verification ===")
+            cuda_info = {
+                'cuda_available': torch.cuda.is_available(),
+                'device_count': torch.cuda.device_count() if torch.cuda.is_available() else 0,
+                'current_device': torch.cuda.current_device() if torch.cuda.is_available() else None,
+                'device_name': torch.cuda.get_device_name() if torch.cuda.is_available() else None
+            }
+            logger.info(f"CUDA information: {cuda_info}")
             
         except Exception as e:
             logger.error(f"Environment verification failed: {str(e)}")
             logger.error("Stack trace:", exc_info=True)
+            raise
 
         # Initialize model with enhanced state verification
         logger.info("=== Model Initialization ===")
