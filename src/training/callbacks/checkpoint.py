@@ -1,12 +1,28 @@
 import shutil
 import os
+import sys
 from pathlib import Path
 from typing import List, Optional
+import logging
 from src.training.callbacks.base import BaseCallback
 from src.infrastructure.logging import get_logger
-from transformers import TrainingArguments, TrainerState, TrainerControl
+from transformers import (
+    TrainingArguments,
+    TrainerState,
+    TrainerControl,
+    TrainerCallback,
+    __version__ as transformers_version
+)
 
 logger = get_logger(__name__)
+
+# Verify imports
+logger.info("=== Import Verification ===")
+logger.info(f"Python version: {sys.version}")
+logger.info(f"Transformers version: {transformers_version}")
+logger.info(f"TrainerCallback available: {TrainerCallback is not None}")
+logger.info(f"BaseCallback available: {BaseCallback is not None}")
+logger.info("===========================")
 
 class ModelCheckpointCallback(TrainerCallback, BaseCallback):
     """Callback for saving model checkpoints during training.
@@ -34,8 +50,19 @@ class ModelCheckpointCallback(TrainerCallback, BaseCallback):
             save_final: Whether to save final model after training
             order: Callback execution order
         """
-        BaseCallback.__init__(self)
-        TrainerCallback.__init__(self)
+        logger.info("Initializing ModelCheckpointCallback")
+        logger.info(f"Callback bases: {self.__class__.__bases__}")
+        
+        # Initialize both parent classes
+        try:
+            BaseCallback.__init__(self)
+            TrainerCallback.__init__(self)
+            logger.info("Successfully initialized parent classes")
+        except Exception as e:
+            logger.error(f"Error initializing parent classes: {str(e)}")
+            raise
+            
+        # Rest of the initialization
         self.checkpoint_dir = Path(checkpoint_dir)
         self.save_steps = save_steps
         self.max_checkpoints = max_checkpoints
