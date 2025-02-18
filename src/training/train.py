@@ -79,11 +79,42 @@ def verify_compatibility():
     logger.info(f"Transformers version verified: {current_transformers}")
     return True
 
+def inspect_model_loading_chain():
+    """Inspect the model loading chain and available configurations."""
+    try:
+        import unsloth
+        logger.info("=== Model Loading Chain Inspection ===")
+        
+        # Check available model classes
+        logger.info("Available model classes:")
+        logger.info(f"FastLanguageModel: {inspect.getmembers(unsloth.FastLanguageModel)}")
+        logger.info(f"Qwen2 module exists: {hasattr(unsloth.models, 'qwen2')}")
+        if hasattr(unsloth.models, 'qwen2'):
+            logger.info(f"Qwen2 module contents: {dir(unsloth.models.qwen2)}")
+        
+        # Check adapter routing
+        logger.info("Adapter routing:")
+        logger.info(f"Direct Qwen2 loading available: {hasattr(unsloth.models.qwen2, 'from_pretrained')}")
+        logger.info(f"Using Llama adapter: {hasattr(unsloth.models.llama, 'from_pretrained')}")
+        
+        return True
+    except Exception as e:
+        logger.error(f"Error inspecting model chain: {str(e)}")
+        return False
+
 def clean_model_config(config: Dict[str, Any]) -> Dict[str, Any]:
-    """Remove tokenizer-specific parameters from model config."""
-    tokenizer_params = ['use_fast_tokenizer', 'use_fast']
-    cleaned = {k: v for k, v in config.items() if k not in tokenizer_params}
-    logger.info(f"Cleaned config: removed {[k for k in config if k not in cleaned]}")
+    """Remove problematic parameters from model config."""
+    # Expanded list of parameters to remove
+    remove_params = [
+        'use_fast_tokenizer', 
+        'use_fast',
+        'tokenizer',  # Remove tokenizer from model config
+        'use_flash_attention',  # Remove potentially conflicting parameters
+        'use_memory_efficient_attention'
+    ]
+    
+    cleaned = {k: v for k, v in config.items() if k not in remove_params}
+    logger.info(f"Removed parameters: {[k for k in config if k not in cleaned]}")
     return cleaned
 
 def verify_qwen_compatibility(model_name: str) -> bool:
@@ -98,6 +129,52 @@ def verify_qwen_compatibility(model_name: str) -> bool:
     except Exception as e:
         logger.error(f"Qwen2 compatibility check failed: {str(e)}")
         return False
+
+def load_model_with_fallback(model_config: Dict[str, Any], tokenizer) -> Any:
+    """Try loading model with fallback options."""
+    logger.info("=== Attempting Model Load with Fallback ===")
+    
+    try:
+        # First attempt: Direct loading
+        logger.info("Attempt 1: Direct FastLanguageModel loading")
+        clean_config = clean_model_config(model_config)
+        logger.info(f"Clean config for attempt 1: {clean_config}")
+        
+        result = FastLanguageModel.from_pretrained(
+            **clean_config
+        )
+        
+        if result is not None:
+            logger.info("Direct loading successful")
+            return result
+            
+    except Exception as e:
+        logger.error(f"Direct loading failed: {str(e)}")
+        
+        try:
+            # Second attempt: Load with transformers then optimize
+            logger.info("Attempt 2: Loading with transformers then applying Unsloth")
+            from transformers import AutoModelForCausalLM
+            
+            base_model = AutoModelForCausalLM.from_pretrained(
+                model_config['model_name'],
+                trust_remote_code=True,
+                load_in_4bit=model_config.get('load_in_4bit', True)
+            )
+            
+            logger.info("Base model loaded, applying Unsloth optimization")
+            # Apply Unsloth optimization after loading
+            optimized_model = FastLanguageModel.optimize_model(
+                base_model,
+                gpu_memory_utilization=model_config.get('gpu_memory_utilization', 0.7),
+                use_gradient_checkpointing=model_config.get('use_gradient_checkpointing', True)
+            )
+            
+            return (optimized_model, tokenizer)
+            
+        except Exception as e2:
+            logger.error(f"Fallback loading failed: {str(e2)}")
+            raise
 
 def train_model(config_path: Union[str, Path]) -> None:
     """Train the model using the specified configuration.
@@ -178,52 +255,28 @@ def train_model(config_path: Union[str, Path]) -> None:
             logger.info("Cleared CUDA cache")
             logger.info(f"Pre-load CUDA Memory: {torch.cuda.memory_allocated() / 1024**2:.2f}MB")
         
-        # Initialize model with enhanced error handling
+        # Add model chain inspection
+        inspect_model_loading_chain()
+        
+        # Initialize model with fallback
         logger.info("=== Model Loading Process ===")
         try:
-            # Verify Unsloth patches
-            logger.info("Applying Unsloth patches...")
-            PatchFastRL("GRPO", FastLanguageModel)
-            logger.info("Patches applied successfully")
-            
-            # Log adapter chain
-            logger.info("=== Model Loading Chain ===")
-            logger.info(f"1. FastLanguageModel config: {model_config}")
-            logger.info(f"2. Qwen2 adapter available: {hasattr(unsloth.models, 'qwen2')}")
-            logger.info(f"3. FastLlama adapter available: {hasattr(unsloth.models, 'llama')}")
-            
-            # First load tokenizer
+            # Load tokenizer first
             logger.info("Loading tokenizer...")
-            from transformers import AutoTokenizer
             tokenizer = AutoTokenizer.from_pretrained(
                 model_config['model_name'],
                 **tokenizer_config
             )
             logger.info(f"Tokenizer loaded successfully: {type(tokenizer)}")
-            logger.info(f"Tokenizer vocabulary size: {tokenizer.vocab_size}")
             
-            # Then load model with clean config
-            logger.info("Loading model with cleaned config...")
-            final_config = clean_model_config(model_config)
-            logger.info(f"Final model config: {final_config}")
-            
-            result = FastLanguageModel.from_pretrained(
-                **final_config,
-                tokenizer=tokenizer
-            )
+            # Try loading model with fallback
+            result = load_model_with_fallback(model_config, tokenizer)
             
             # Verify loaded model
             if result is not None:
                 model = result[0] if isinstance(result, tuple) else result
                 logger.info(f"Model loaded successfully. Type: {type(model)}")
                 logger.info(f"Model parameters: {sum(p.numel() for p in model.parameters())}")
-                logger.info(f"Model device: {next(model.parameters()).device}")
-                
-                # Verify model capabilities
-                logger.info("=== Model Capabilities ===")
-                logger.info(f"Has attention mask: {hasattr(model, 'get_attention_mask')}")
-                logger.info(f"Has position IDs: {hasattr(model, 'get_position_ids')}")
-                logger.info(f"Supports gradient checkpointing: {hasattr(model, 'gradient_checkpointing_enable')}")
                 
                 return (model, tokenizer)
             else:
@@ -233,11 +286,7 @@ def train_model(config_path: Union[str, Path]) -> None:
             logger.error("=== Model Loading Error Context ===")
             logger.error(f"Error type: {type(e).__name__}")
             logger.error(f"Error message: {str(e)}")
-            logger.error(f"Configuration used: {final_config}")
-            logger.error(f"Model loading chain:")
-            logger.error(f"1. FastLanguageModel → {hasattr(unsloth.models, 'loader')}")
-            logger.error(f"2. Qwen2 adapter → {hasattr(unsloth.models, 'qwen2')}")
-            logger.error(f"3. FastLlama adapter → {hasattr(unsloth.models, 'llama')}")
+            logger.error(f"Model loading chain trace:", exc_info=True)
             raise
 
         # Initialize trainer with verified model
