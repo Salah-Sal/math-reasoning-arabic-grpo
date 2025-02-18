@@ -71,13 +71,47 @@ def train_model(config_path: Union[str, Path]) -> None:
         reward_handler = RewardHandler(config.reward.model_dump())
         logger.info(f"RewardHandler initialized with config: {reward_handler.config}")
         
-        # Verify Unsloth patch and GRPO requirements
-        logger.info("=== GRPO/Unsloth Verification ===")
-        logger.info(f"Available trainer attributes: {dir(GRPOTrainer)}")
-        logger.info(f"Trainer init signature: {GRPOTrainer.__init__.__doc__}")
+        # Verify Unsloth and model initialization
+        logger.info("=== Model Initialization Verification ===")
+        logger.info(f"FastLanguageModel attributes: {dir(FastLanguageModel)}")
+        logger.info(f"PatchFastRL attributes: {dir(PatchFastRL)}")
         
-        model = FastLanguageModel.from_pretrained(**model_config)
-        model = PatchFastRL(model)
+        try:
+            logger.info("Step 1: Initializing FastLanguageModel")
+            model = FastLanguageModel.from_pretrained(**model_config)
+            logger.info(f"Model type after FastLanguageModel init: {type(model)}")
+            logger.info(f"Model attributes after FastLanguageModel init: {dir(model)}")
+            logger.info(f"Model config present: {hasattr(model, 'config')}")
+            if hasattr(model, 'config'):
+                logger.info(f"Model config attributes: {dir(model.config)}")
+            
+            logger.info("Step 2: Applying PatchFastRL")
+            model = PatchFastRL(model)
+            logger.info(f"Model type after patch: {type(model)}")
+            logger.info(f"Model attributes after patch: {dir(model)}")
+            logger.info(f"Model config present after patch: {hasattr(model, 'config')}")
+            if hasattr(model, 'config'):
+                logger.info(f"Model config attributes after patch: {dir(model.config)}")
+            
+            # Verify model configuration
+            logger.info("=== Model Configuration Verification ===")
+            if hasattr(model, 'config'):
+                logger.info(f"Config type: {type(model.config)}")
+                logger.info(f"Config attributes: {dir(model.config)}")
+                logger.info(f"torch_dtype present: {hasattr(model.config, 'torch_dtype')}")
+                if hasattr(model.config, 'torch_dtype'):
+                    logger.info(f"torch_dtype value: {model.config.torch_dtype}")
+            else:
+                logger.error("Model configuration is missing!")
+                
+            # Verify model state
+            logger.info("=== Model State Verification ===")
+            logger.info(f"Model device: {next(model.parameters()).device if hasattr(model, 'parameters') else 'No parameters'}")
+            logger.info(f"Model training mode: {model.training if hasattr(model, 'training') else 'Unknown'}")
+            
+        except Exception as e:
+            logger.error(f"Error during model initialization: {str(e)}", exc_info=True)
+            raise
         
         monitor.log_model_info(model)
         
