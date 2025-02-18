@@ -1,0 +1,33 @@
+training:
+  learning_rate: 3.0e-6
+  max_steps: 1000
+  per_device_train_batch_size: 8
+  gradient_accumulation_steps: 4
+  max_prompt_length: 256
+  max_completion_length: 128
+  logging_steps: 10
+  save_steps: 100
+  warmup_steps: 100
+  max_checkpoints: 3
+  report_to: "none"  # Disable wandb/tensorboard by default
+
+memory:
+  gpu_memory_utilization: 0.7
+  use_gradient_checkpointing: true
+  optimize_memory_use: true
+  max_memory_MB: 8000
+  dtype: "float16"  # or "bfloat16" if supported
+
+reward:
+  weights:
+    xml_structure: 0.3
+    format: 0.3
+    correctness: 0.4
+  cache_size: 1000
+  normalize_rewards: true
+
+paths:
+  output_dir: "outputs/grpo_training"
+  checkpoint_dir: "checkpoints"
+  log_dir: "logs"
+  cache_dir: ".cache" 
