@@ -8,7 +8,7 @@ from src.training.config import GRPOConfig
 from src.infrastructure.logging import get_logger
 from src.training.callbacks.checkpoint import ModelCheckpointCallback
 from src.training.callbacks.early_stopping import EarlyStoppingCallback
-from typing import Union
+from typing import Union, Dict, Any
 import os
 import inspect
 from packaging import version
@@ -79,6 +79,26 @@ def verify_compatibility():
     logger.info(f"Transformers version verified: {current_transformers}")
     return True
 
+def clean_model_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Remove tokenizer-specific parameters from model config."""
+    tokenizer_params = ['use_fast_tokenizer', 'use_fast']
+    cleaned = {k: v for k, v in config.items() if k not in tokenizer_params}
+    logger.info(f"Cleaned config: removed {[k for k in config if k not in cleaned]}")
+    return cleaned
+
+def verify_qwen_compatibility(model_name: str) -> bool:
+    """Verify Qwen2 model compatibility."""
+    try:
+        from transformers import AutoConfig
+        logger.info(f"Verifying compatibility for model: {model_name}")
+        config = AutoConfig.from_pretrained(model_name, trust_remote_code=True)
+        logger.info(f"Qwen2 config type: {type(config)}")
+        logger.info(f"Available config attributes: {dir(config)}")
+        return True
+    except Exception as e:
+        logger.error(f"Qwen2 compatibility check failed: {str(e)}")
+        return False
+
 def train_model(config_path: Union[str, Path]) -> None:
     """Train the model using the specified configuration.
     
@@ -118,47 +138,45 @@ def train_model(config_path: Union[str, Path]) -> None:
         logger.info(f"Loading configuration from {config_path}")
         training_config = GRPOConfig.from_yaml(config_path)
         
-        # Initialize base model configuration
-        logger.info("=== Initializing Model Configuration ===")
+        # Initialize base configurations with separation
+        logger.info("=== Configuration Chain Logging ===")
         base_model_config = {
             'model_name': training_config.model.name,
             'max_seq_length': training_config.model.max_seq_length,
             'load_in_4bit': training_config.model.load_in_4bit,
             'device_map': 'auto',
-            'torch_dtype': torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16,
             'trust_remote_code': True
         }
-        logger.info(f"Base model configuration: {base_model_config}")
+        
+        # Separate tokenizer configuration
+        tokenizer_config = {
+            'trust_remote_code': True,
+            'use_fast': True
+        }
+        logger.info(f"Tokenizer config: {tokenizer_config}")
+        
+        # Clean model configuration
+        model_config = clean_model_config(base_model_config)
+        logger.info(f"Initial cleaned model config: {model_config}")
         
         # Memory configuration
         logger.info("=== Memory Configuration ===")
         memory_config = training_config.memory.model_dump()
-        base_model_config.update({
+        model_config.update({
             'gpu_memory_utilization': memory_config.get('gpu_memory_utilization', 0.7),
             'use_gradient_checkpointing': memory_config.get('use_gradient_checkpointing', True)
         })
-        logger.info(f"Updated model configuration with memory settings: {base_model_config}")
+        logger.info(f"Updated model configuration with memory settings: {model_config}")
         
-        # Verify Unsloth installation and patches
-        logger.info("=== Unsloth Verification ===")
-        logger.info(f"FastLanguageModel available: {hasattr(unsloth, 'FastLanguageModel')}")
-        logger.info(f"PatchFastRL available: {hasattr(unsloth, 'PatchFastRL')}")
-        
-        # Model type detection and specific configuration
-        model_name = training_config.model.name.lower()
-        logger.info(f"Detected model type: {'qwen' if 'qwen' in model_name else 'unknown'}")
-        
-        if 'qwen' in model_name:
-            logger.info("Applying Qwen-specific configuration")
-            base_model_config.update({
-                'use_flash_attention': training_config.model.optimization_config.get('use_flash_attention', False),
-                'use_memory_efficient_attention': training_config.model.optimization_config.get('use_memory_efficient_attention', True)
-            })
+        # Verify Qwen compatibility
+        if not verify_qwen_compatibility(model_config['model_name']):
+            logger.warning("Qwen compatibility check failed - proceeding with caution")
         
         # Clear CUDA cache before model loading
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             logger.info("Cleared CUDA cache")
+            logger.info(f"Pre-load CUDA Memory: {torch.cuda.memory_allocated() / 1024**2:.2f}MB")
         
         # Initialize model with enhanced error handling
         logger.info("=== Model Loading Process ===")
@@ -168,57 +186,30 @@ def train_model(config_path: Union[str, Path]) -> None:
             PatchFastRL("GRPO", FastLanguageModel)
             logger.info("Patches applied successfully")
             
-            # Log Unsloth model chain
+            # Log adapter chain
             logger.info("=== Model Loading Chain ===")
-            logger.info(f"Initial loader: FastLanguageModel")
-            logger.info(f"Qwen2 adapter available: {hasattr(unsloth.models, 'qwen2')}")
-            logger.info(f"Llama adapter available: {hasattr(unsloth.models, 'llama')}")
+            logger.info(f"1. FastLanguageModel config: {model_config}")
+            logger.info(f"2. Qwen2 adapter available: {hasattr(unsloth.models, 'qwen2')}")
+            logger.info(f"3. FastLlama adapter available: {hasattr(unsloth.models, 'llama')}")
             
-            # Remove torch_dtype from base config as it's handled by Unsloth
-            model_config = base_model_config.copy()
-            if 'torch_dtype' in model_config:
-                dtype = model_config.pop('torch_dtype')
-                logger.info(f"Removed torch_dtype ({dtype}) from explicit config")
-            
-            # Prepare Qwen-specific configuration
-            if 'qwen' in model_name:
-                logger.info("=== Qwen Model Configuration ===")
-                # Remove potentially conflicting parameters
-                for param in ['use_flash_attention', 'use_memory_efficient_attention']:
-                    if param in model_config:
-                        removed_val = model_config.pop(param)
-                        logger.info(f"Removed {param} ({removed_val}) to prevent conflicts")
-                
-                # Add Qwen-specific parameters
-                model_config.update({
-                    'trust_remote_code': True,
-                    'use_fast_tokenizer': True
-                })
-                logger.info(f"Final Qwen configuration: {model_config}")
-            
-            # Memory check before loading
-            if torch.cuda.is_available():
-                logger.info(f"Pre-load CUDA Memory: {torch.cuda.memory_allocated() / 1024**2:.2f}MB")
-            
-            # Try loading model with cleaned configuration
-            logger.info("=== Model Loading Attempt ===")
-            logger.info(f"Using configuration: {model_config}")
-            
-            # First try loading tokenizer separately
+            # First load tokenizer
             logger.info("Loading tokenizer...")
             from transformers import AutoTokenizer
             tokenizer = AutoTokenizer.from_pretrained(
                 model_config['model_name'],
-                trust_remote_code=True,
-                use_fast=True
+                **tokenizer_config
             )
-            logger.info("Tokenizer loaded successfully")
+            logger.info(f"Tokenizer loaded successfully: {type(tokenizer)}")
+            logger.info(f"Tokenizer vocabulary size: {tokenizer.vocab_size}")
             
-            # Then load model
-            logger.info("Loading model...")
+            # Then load model with clean config
+            logger.info("Loading model with cleaned config...")
+            final_config = clean_model_config(model_config)
+            logger.info(f"Final model config: {final_config}")
+            
             result = FastLanguageModel.from_pretrained(
-                **model_config,
-                tokenizer=tokenizer  # Pass existing tokenizer
+                **final_config,
+                tokenizer=tokenizer
             )
             
             # Verify loaded model
@@ -227,7 +218,6 @@ def train_model(config_path: Union[str, Path]) -> None:
                 logger.info(f"Model loaded successfully. Type: {type(model)}")
                 logger.info(f"Model parameters: {sum(p.numel() for p in model.parameters())}")
                 logger.info(f"Model device: {next(model.parameters()).device}")
-                logger.info(f"Model config type: {type(getattr(model, 'config', None))}")
                 
                 # Verify model capabilities
                 logger.info("=== Model Capabilities ===")
@@ -240,13 +230,14 @@ def train_model(config_path: Union[str, Path]) -> None:
                 raise ValueError("Model loading returned None")
                 
         except Exception as e:
-            logger.error(f"Model initialization failed: {str(e)}")
-            logger.error("=== Error Context ===")
-            logger.error(f"Model loading chain trace:", exc_info=True)
-            logger.error(f"Configuration used: {model_config}")
-            logger.error(f"CUDA state: {torch.cuda.is_available()}")
-            logger.error(f"Memory state: {torch.cuda.memory_allocated() / 1024**2:.2f}MB")
-            logger.error(f"Unsloth state: {dir(unsloth) if 'unsloth' in locals() else 'Not imported'}")
+            logger.error("=== Model Loading Error Context ===")
+            logger.error(f"Error type: {type(e).__name__}")
+            logger.error(f"Error message: {str(e)}")
+            logger.error(f"Configuration used: {final_config}")
+            logger.error(f"Model loading chain:")
+            logger.error(f"1. FastLanguageModel → {hasattr(unsloth.models, 'loader')}")
+            logger.error(f"2. Qwen2 adapter → {hasattr(unsloth.models, 'qwen2')}")
+            logger.error(f"3. FastLlama adapter → {hasattr(unsloth.models, 'llama')}")
             raise
 
         # Initialize trainer with verified model
