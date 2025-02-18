@@ -89,6 +89,25 @@ class MemorySettings(BaseModel):
         description="Data type for training"
     )
 
+class ModelSettings(BaseModel):
+    """Model configuration settings."""
+    model_name: str = Field(
+        default="Qwen/Qwen2.5-1.5B-Instruct",
+        description="Name or path of the model to use"
+    )
+    trust_remote_code: bool = Field(
+        default=True,
+        description="Whether to trust remote code when loading model"
+    )
+    load_in_4bit: bool = Field(
+        default=True,
+        description="Whether to load model in 4-bit quantization"
+    )
+    use_flash_attention: bool = Field(
+        default=True,
+        description="Whether to use flash attention"
+    )
+
 class RewardWeights(BaseModel):
     """Reward function weights."""
     xml_structure: float = Field(
@@ -187,6 +206,10 @@ class EarlyStoppingSettings(BaseModel):
 
 class GRPOConfig(BaseModel):
     """Main GRPO training configuration."""
+    model: ModelSettings = Field(
+        default_factory=ModelSettings,
+        description="Model settings"
+    )
     training: TrainingSettings = Field(
         default_factory=TrainingSettings,
         description="Training settings"
