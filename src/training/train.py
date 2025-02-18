@@ -257,61 +257,25 @@ def train_model(config_path: Union[str, Path]) -> None:
         logger.info("=== Trainer Initialization ===")
         logger.info(f"Training arguments: {training_args}")
         
-        # Setup PEFT using Unsloth's approach
-        logger.info("=== Unsloth PEFT Configuration ===")
-        try:
-            # Log PEFT configuration
-            logger.info(f"LoRA rank: {training_config.model.lora_rank}")
-            logger.info(f"LoRA alpha: {training_config.model.lora_alpha}")
-            logger.info(f"Target modules: {training_config.model.target_modules}")
-            logger.info(f"LoRA dropout: {training_config.model.lora_dropout}")
-            
-            # Verify model state before PEFT
-            logger.info("=== Pre-PEFT Model State ===")
-            logger.info(f"Model type: {type(model)}")
-            logger.info(f"Model is quantized: {getattr(model, 'is_quantized', False)}")
-            logger.info(f"Initial trainable params: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
-            
-            # Apply Unsloth PEFT
-            logger.info("Applying Unsloth PEFT configuration")
-            model = FastLanguageModel.get_peft_model(
-                model,
-                r=training_config.model.lora_rank,
-                target_modules=training_config.model.target_modules,
-                lora_alpha=training_config.model.lora_alpha,
-                lora_dropout=training_config.model.lora_dropout,
-                use_gradient_checkpointing=training_config.memory.use_gradient_checkpointing,
-                random_state=3407
-            )
-            
-            # Verify PEFT setup
-            logger.info("=== Post-PEFT Verification ===")
-            logger.info(f"Model has PEFT config: {hasattr(model, 'peft_config')}")
-            logger.info(f"Trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
-            logger.info(f"Total parameters: {sum(p.numel() for p in model.parameters())}")
-            logger.info(f"Percentage trainable: {(sum(p.numel() for p in model.parameters() if p.requires_grad) / sum(p.numel() for p in model.parameters())) * 100:.2f}%")
-            logger.info(f"Model device: {next(model.parameters()).device}")
-            
-            # Verify memory state
-            if torch.cuda.is_available():
-                logger.info("=== GPU Memory State ===")
-                logger.info(f"GPU Memory Allocated: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
-                logger.info(f"GPU Memory Reserved: {torch.cuda.memory_reserved() / 1e9:.2f} GB")
-            
-        except Exception as e:
-            logger.error(f"Error setting up Unsloth PEFT: {str(e)}")
-            logger.error("Full model configuration:", exc_info=True)
-            logger.error(f"Available model attributes: {dir(model)}")
-            raise ValueError(f"Failed to setup Unsloth PEFT adapters: {str(e)}")
-        
-        logger.info("Initializing GRPO Trainer with reward functions...")
-        
+        # Create reward function wrapper for GRPO
+        def reward_function(prompts, completions, **kwargs):
+            logger.info("=== GRPO Reward Function Called ===")
+            logger.info(f"Prompts: {len(prompts)}, Completions: {len(completions)}")
+            logger.info(f"Additional kwargs: {kwargs}")
+            try:
+                rewards = reward_handler.calculate_rewards(prompts=prompts, completions=completions, **kwargs)
+                logger.info(f"Calculated rewards: min={min(rewards):.3f}, max={max(rewards):.3f}, avg={sum(rewards)/len(rewards):.3f}")
+                return rewards
+            except Exception as e:
+                logger.error(f"Error in reward function: {str(e)}", exc_info=True)
+                return [0.0] * len(completions)
+
         trainer = GRPOTrainer(
             model=model,
             args=training_args,
             train_dataset=dataset,
             callbacks=callbacks,
-            reward_funcs=[reward_handler.calculate_rewards]
+            reward_funcs=[reward_function]  # Use wrapped function
         )
         logger.info("GRPO Trainer initialized successfully")
         

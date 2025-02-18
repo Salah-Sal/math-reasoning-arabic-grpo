@@ -21,11 +21,7 @@ class RewardHandler:
     }
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
-        """Initialize the reward handler.
-        
-        Args:
-            config: Optional configuration dictionary to override defaults
-        """
+        """Initialize the reward handler."""
         # Deep copy to prevent mutations
         base_config = config.copy() if config else self.DEFAULT_CONFIG.copy()
         self.config = self._normalize_config(base_config)
@@ -52,34 +48,154 @@ class RewardHandler:
         
         return config
 
-    def calculate_rewards(self, completions: List[Dict[str, str]], expected_answer: str) -> List[float]:
-        """Calculate combined rewards for completions.
+    def calculate_rewards(self, prompts: List[Dict[str, Any]], completions: List[Dict[str, Any]], **kwargs) -> List[float]:
+        """Calculate rewards for completions.
         
         Args:
-            completions: List of completion dictionaries
-            expected_answer: Expected numerical answer
+            prompts: List of prompt dictionaries containing the input context
+            completions: List of completion dictionaries containing model responses
+            **kwargs: Additional arguments for reward calculation
             
         Returns:
             List of float rewards
         """
-        weights = self.config["weights"]
-        
-        # Calculate individual rewards
-        xml_rewards = self.calculate_xml_reward(completions)
-        format_rewards = self.calculate_format_reward(completions)
-        correctness_rewards = self.calculate_correctness_reward(completions, expected_answer)
-        
-        # Combine rewards
-        combined_rewards = []
-        for xml_r, fmt_r, corr_r in zip(xml_rewards, format_rewards, correctness_rewards):
-            reward = (
-                xml_r * weights["xml_structure"] +
-                fmt_r * weights["format"] +
-                corr_r * weights["correctness"]
-            )
-            combined_rewards.append(min(1.0, max(0.0, reward)))
+        try:
+            logger.info("=== Starting Reward Calculation ===")
+            logger.info(f"Number of prompts: {len(prompts)}")
+            logger.info(f"Number of completions: {len(completions)}")
+            logger.debug(f"Additional kwargs: {kwargs}")
             
-        return combined_rewards
+            # Input validation
+            if not self._validate_inputs(prompts, completions):
+                logger.error("Input validation failed")
+                return [0.0] * len(completions)
+            
+            # Extract expected answers from prompts
+            expected_answers = []
+            for prompt in prompts:
+                try:
+                    # Log prompt structure for debugging
+                    logger.debug(f"Prompt structure: {list(prompt.keys())}")
+                    
+                    # Extract answer from the last message if it's a list of messages
+                    messages = prompt.get('prompt', [])
+                    if isinstance(messages, list) and messages:
+                        user_message = messages[-1].get('content', '')
+                        # Extract answer from the Arabic text (assuming format includes #### separator)
+                        answer = self._extract_answer_from_text(user_message)
+                        expected_answers.append(answer)
+                        logger.debug(f"Extracted expected answer: {answer}")
+                    else:
+                        logger.warning(f"Unexpected prompt format: {prompt}")
+                        expected_answers.append("")
+                except Exception as e:
+                    logger.error(f"Error extracting answer from prompt: {str(e)}")
+                    expected_answers.append("")
+            
+            # Calculate individual rewards
+            rewards = []
+            for completion, expected_answer in zip(completions, expected_answers):
+                try:
+                    # Get completion content
+                    content = completion.get('content', '')
+                    logger.debug(f"Processing completion: {content[:100]}...")
+                    
+                    # Calculate component rewards
+                    xml_reward = self._calculate_xml_reward(content)
+                    format_reward = self._calculate_format_reward(content)
+                    correctness_reward = self._calculate_correctness_reward(content, expected_answer)
+                    
+                    # Log component rewards
+                    logger.debug(f"Component rewards - XML: {xml_reward:.3f}, Format: {format_reward:.3f}, Correctness: {correctness_reward:.3f}")
+                    
+                    # Combine rewards using weights
+                    weights = self.config["weights"]
+                    final_reward = (
+                        xml_reward * weights["xml_structure"] +
+                        format_reward * weights["format"] +
+                        correctness_reward * weights["correctness"]
+                    )
+                    
+                    # Normalize and append
+                    normalized_reward = max(0.0, min(1.0, final_reward))
+                    rewards.append(normalized_reward)
+                    logger.debug(f"Final reward: {normalized_reward:.3f}")
+                    
+                except Exception as e:
+                    logger.error(f"Error calculating reward for completion: {str(e)}")
+                    rewards.append(0.0)
+            
+            logger.info(f"Calculated {len(rewards)} rewards")
+            logger.info(f"Average reward: {sum(rewards)/len(rewards):.3f}")
+            return rewards
+            
+        except Exception as e:
+            logger.error(f"Error in reward calculation: {str(e)}")
+            return [0.0] * len(completions)
+
+    def _validate_inputs(self, prompts: List[Dict[str, Any]], completions: List[Dict[str, Any]]) -> bool:
+        """Validate input format and structure."""
+        try:
+            # Basic validation
+            if not isinstance(prompts, list) or not isinstance(completions, list):
+                logger.error("Inputs must be lists")
+                return False
+            
+            if len(prompts) != len(completions):
+                logger.error(f"Mismatched lengths: prompts={len(prompts)}, completions={len(completions)}")
+                return False
+            
+            if not prompts or not completions:
+                logger.error("Empty inputs")
+                return False
+            
+            # Validate prompt structure
+            for prompt in prompts:
+                if not isinstance(prompt, dict):
+                    logger.error(f"Invalid prompt type: {type(prompt)}")
+                    return False
+                if 'prompt' not in prompt:
+                    logger.error("Missing 'prompt' key in prompt")
+                    return False
+            
+            # Validate completion structure
+            for completion in completions:
+                if not isinstance(completion, dict):
+                    logger.error(f"Invalid completion type: {type(completion)}")
+                    return False
+                if 'content' not in completion:
+                    logger.error("Missing 'content' key in completion")
+                    return False
+            
+            return True
+        except Exception as e:
+            logger.error(f"Error in input validation: {str(e)}")
+            return False
+
+    def _extract_answer_from_text(self, text: str) -> str:
+        """Extract numerical answer from Arabic text."""
+        try:
+            # Split on #### and take the last part
+            parts = text.split('####')
+            if len(parts) < 2:
+                logger.warning("No answer delimiter (####) found")
+                return ""
+            
+            numerical_answer = parts[-1].strip()
+            logger.debug(f"Raw extracted answer: {numerical_answer}")
+            
+            # Convert Arabic numerals to English
+            arabic_to_english = str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789')
+            numerical_answer = numerical_answer.translate(arabic_to_english)
+            
+            # Extract only digits
+            numerical_answer = ''.join(c for c in numerical_answer if c.isdigit())
+            logger.debug(f"Processed numerical answer: {numerical_answer}")
+            
+            return numerical_answer
+        except Exception as e:
+            logger.error(f"Error extracting answer: {str(e)}")
+            return ""
 
     def calculate_xml_reward(self, completions: List[Dict[str, str]]) -> List[float]:
         """Calculate reward for XML structure.
