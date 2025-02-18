@@ -77,27 +77,51 @@ class BaseCallback(ABC):
     
     def on_training_start(self) -> None:
         """Called when training starts."""
-        self._call_event("_on_training_start")
+        if self.is_active:
+            try:
+                self._on_training_start()
+            except Exception as e:
+                logger.error(f"Error in {self.__class__.__name__}.on_training_start: {str(e)}")
     
     def on_training_end(self) -> None:
         """Called when training ends."""
-        self._call_event("_on_training_end")
+        if self.is_active:
+            try:
+                self._on_training_end()
+            except Exception as e:
+                logger.error(f"Error in {self.__class__.__name__}.on_training_end: {str(e)}")
     
     def on_step_begin(self) -> None:
         """Called at the beginning of each training step."""
-        self._call_event("_on_step_begin")
+        if self.is_active:
+            try:
+                self._on_step_begin()
+            except Exception as e:
+                logger.error(f"Error in {self.__class__.__name__}.on_step_begin: {str(e)}")
     
     def on_step_end(self) -> None:
         """Called at the end of each training step."""
-        self._call_event("_on_step_end")
+        if self.is_active:
+            try:
+                self._on_step_end()
+            except Exception as e:
+                logger.error(f"Error in {self.__class__.__name__}.on_step_end: {str(e)}")
     
     def on_evaluate(self) -> None:
         """Called during model evaluation."""
-        self._call_event("_on_evaluate")
+        if self.is_active:
+            try:
+                self._on_evaluate()
+            except Exception as e:
+                logger.error(f"Error in {self.__class__.__name__}.on_evaluate: {str(e)}")
     
     def on_save(self) -> None:
         """Called when model is being saved."""
-        self._call_event("_on_save")
+        if self.is_active:
+            try:
+                self._on_save()
+            except Exception as e:
+                logger.error(f"Error in {self.__class__.__name__}.on_save: {str(e)}")
     
     # Protected event methods for subclasses to override
     def _on_training_start(self) -> None:

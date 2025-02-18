@@ -22,7 +22,7 @@ def test_base_callback_initialization():
     
     callback = BaseCallback()
     assert callback.order == 0
-    assert callback.trainer is None
+    assert callback._trainer is None
     assert callback.is_active
 
 def test_callback_activation():
@@ -111,7 +111,7 @@ def test_callback_error_handling(mock_trainer):
     from src.training.callbacks.base import BaseCallback
     
     class ErrorCallback(BaseCallback):
-        def on_step_begin(self):
+        def _on_step_begin(self):
             raise ValueError("Test error")
     
     callback = ErrorCallback()
