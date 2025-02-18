@@ -33,6 +33,7 @@ early_stopping:
   min_steps: 100
 
 paths:
+  data_path: "/home/Sal3/ml_data/translations"
   output_dir: "outputs/grpo_training"
   checkpoint_dir: "checkpoints"
   log_dir: "logs"

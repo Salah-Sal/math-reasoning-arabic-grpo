@@ -156,6 +156,10 @@ class RewardSettings(BaseModel):
 
 class PathSettings(BaseModel):
     """Path configuration settings."""
+    data_path: Path = Field(
+        default=Path("/home/Sal3/ml_data/translations"),
+        description="Directory containing the dataset files"
+    )
     output_dir: Path = Field(
         default=Path("outputs/grpo_training"),
         description="Directory for training outputs"
@@ -179,7 +183,12 @@ class PathSettings(BaseModel):
     def create_directories(cls, v: Path) -> Path:
         """Ensure directories exist."""
         if v is not None:
-            v.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Validating path: {v}")
+            try:
+                v.mkdir(parents=True, exist_ok=True)
+                logger.info(f"Directory exists or created: {v}")
+            except Exception as e:
+                logger.warning(f"Could not create directory {v}: {e}")
         return v
 
 class EarlyStoppingSettings(BaseModel):
@@ -237,10 +246,23 @@ class GRPOConfig(BaseModel):
     def from_yaml(cls, config_path: Path) -> "GRPOConfig":
         """Load configuration from YAML file."""
         try:
+            logger.info(f"Loading configuration from {config_path}")
             with open(config_path, 'r') as f:
                 config_dict = yaml.safe_load(f)
-            logger.info(f"Loaded configuration from {config_path}")
-            return cls(**config_dict)
+            logger.info(f"Loaded raw configuration: {config_dict}")
+            
+            # Convert string paths to Path objects
+            if 'paths' in config_dict:
+                paths_config = config_dict['paths']
+                logger.info(f"Processing paths configuration: {paths_config}")
+                for key in ['data_path', 'output_dir', 'checkpoint_dir', 'log_dir', 'cache_dir']:
+                    if key in paths_config and paths_config[key]:
+                        paths_config[key] = Path(paths_config[key])
+                        logger.info(f"Converted {key} to Path: {paths_config[key]}")
+            
+            config = cls(**config_dict)
+            logger.info(f"Successfully created config object: {config}")
+            return config
         except Exception as e:
             logger.error(f"Error loading configuration from {config_path}: {str(e)}")
             raise
