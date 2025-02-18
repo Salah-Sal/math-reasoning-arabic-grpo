@@ -99,9 +99,13 @@ def train_model(config_path: Union[str, Path]) -> None:
         logger.info(f"Transformers: {transformers.__version__}")
         logger.info(f"Unsloth: {get_unsloth_version()}")
         logger.info(f"CUDA Available: {torch.cuda.is_available()}")
-        if torch.cuda.is_available():
-            logger.info(f"CUDA Version: {torch.version.cuda}")
-            logger.info(f"GPU: {torch.cuda.get_device_name()}")
+        
+        # Environment setup logging
+        logger.info("=== Environment Setup ===")
+        os.environ['TRUST_REMOTE_CODE'] = '1'
+        logger.info(f"Environment variables:")
+        logger.info(f"TRUST_REMOTE_CODE: {os.getenv('TRUST_REMOTE_CODE')}")
+        logger.info(f"CUDA_VISIBLE_DEVICES: {os.getenv('CUDA_VISIBLE_DEVICES')}")
         
         # Memory state logging
         logger.info("=== Initial Memory State ===")
@@ -114,19 +118,42 @@ def train_model(config_path: Union[str, Path]) -> None:
         logger.info(f"Loading configuration from {config_path}")
         training_config = GRPOConfig.from_yaml(config_path)
         
+        # Initialize base model configuration
+        logger.info("=== Initializing Model Configuration ===")
+        base_model_config = {
+            'model_name': training_config.model.name,
+            'max_seq_length': training_config.model.max_seq_length,
+            'load_in_4bit': training_config.model.load_in_4bit,
+            'device_map': 'auto',
+            'torch_dtype': torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16,
+            'trust_remote_code': True
+        }
+        logger.info(f"Base model configuration: {base_model_config}")
+        
+        # Memory configuration
+        logger.info("=== Memory Configuration ===")
+        memory_config = training_config.memory.model_dump()
+        base_model_config.update({
+            'gpu_memory_utilization': memory_config.get('gpu_memory_utilization', 0.7),
+            'use_gradient_checkpointing': memory_config.get('use_gradient_checkpointing', True)
+        })
+        logger.info(f"Updated model configuration with memory settings: {base_model_config}")
+        
         # Verify Unsloth installation and patches
         logger.info("=== Unsloth Verification ===")
         logger.info(f"FastLanguageModel available: {hasattr(unsloth, 'FastLanguageModel')}")
         logger.info(f"PatchFastRL available: {hasattr(unsloth, 'PatchFastRL')}")
         
-        # Model type detection
+        # Model type detection and specific configuration
         model_name = training_config.model.name.lower()
         logger.info(f"Detected model type: {'qwen' if 'qwen' in model_name else 'unknown'}")
         
-        # Configuration validation
-        logger.info("=== Configuration Validation ===")
-        logger.info(f"Model config: {training_config.model.model_dump()}")
-        logger.info(f"Memory config: {training_config.memory.model_dump()}")
+        if 'qwen' in model_name:
+            logger.info("Applying Qwen-specific configuration")
+            base_model_config.update({
+                'use_flash_attention': training_config.model.optimization_config.get('use_flash_attention', False),
+                'use_memory_efficient_attention': training_config.model.optimization_config.get('use_memory_efficient_attention', True)
+            })
         
         # Clear CUDA cache before model loading
         if torch.cuda.is_available():
@@ -141,21 +168,13 @@ def train_model(config_path: Union[str, Path]) -> None:
             PatchFastRL("GRPO", FastLanguageModel)
             logger.info("Patches applied successfully")
             
-            # Log model loading attempt
-            logger.info(f"Loading model: {training_config.model.name}")
-            logger.info(f"Loading configuration: {base_model_config}")
-            
             # Memory check before loading
             if torch.cuda.is_available():
                 logger.info(f"Pre-load CUDA Memory: {torch.cuda.memory_allocated() / 1024**2:.2f}MB")
             
             # Try loading model
-            result = FastLanguageModel.from_pretrained(
-                model_name=base_model_config['model_name'],
-                max_seq_length=training_config.model.max_seq_length,
-                load_in_4bit=training_config.model.load_in_4bit,
-                device_map='auto'
-            )
+            logger.info(f"Loading model with configuration: {base_model_config}")
+            result = FastLanguageModel.from_pretrained(**base_model_config)
             
             # Verify loaded model
             if result is not None:
