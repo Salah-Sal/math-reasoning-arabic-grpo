@@ -136,22 +136,21 @@ class ModelSettings(BaseModel):
         default=0.7,
         description="GPU memory utilization target"
     )
-    flash_attention_config: Dict[str, Any] = Field(
+    optimization_config: Dict[str, Any] = Field(
         default_factory=lambda: {
-            "enabled": True,
-            "cross_attention": True,
-            "flash_rotary": True,
-            "flash_normalization": True,
-            "device": "cuda"
+            "use_flash_attention": False,  # Disabled by default for Qwen2
+            "use_memory_efficient_attention": True,
+            "use_gradient_checkpointing": True,
+            "enable_xformers": True
         },
-        description="Flash attention configuration parameters"
+        description="Model optimization configuration"
     )
 
     model_config = ConfigDict(
-        extra='allow',  # Allow extra fields
-        validate_assignment=True,  # Validate during assignment
-        populate_by_name=True,  # Allow population by field name or alias
-        alias_generator=None  # No automatic alias generation
+        extra='allow',
+        validate_assignment=True,
+        populate_by_name=True,
+        alias_generator=None
     )
 
     @property
@@ -160,7 +159,7 @@ class ModelSettings(BaseModel):
         return self.name
 
     def get_base_config(self) -> Dict[str, Any]:
-        """Get base model configuration without flash attention settings."""
+        """Get base model configuration."""
         logger.info("Extracting base model configuration")
         config = {
             'model_name': self.name,
@@ -172,18 +171,38 @@ class ModelSettings(BaseModel):
         logger.debug(f"Base config: {config}")
         return config
 
-    def get_flash_attention_config(self) -> Optional[Dict[str, Any]]:
-        """Get flash attention configuration if enabled."""
-        logger.info("Getting flash attention configuration")
-        if not self.flash_attention_config.get('enabled', False):
-            logger.info("Flash attention disabled")
-            return None
+    def get_optimization_config(self) -> Dict[str, Any]:
+        """Get model-specific optimization configuration."""
+        logger.info("Getting optimization configuration")
         
-        config = {
-            k: v for k, v in self.flash_attention_config.items()
-            if k != 'enabled'
-        }
-        logger.debug(f"Flash attention config: {config}")
+        # Start with default optimizations
+        config = self.optimization_config.copy()
+        
+        try:
+            # Check model-specific support
+            from transformers import AutoConfig
+            base_config = AutoConfig.from_pretrained(self.name, trust_remote_code=True)
+            
+            # Log available optimizations
+            logger.info("=== Available Optimizations ===")
+            logger.info(f"Model type: {type(base_config).__name__}")
+            logger.info(f"Flash attention support: {hasattr(base_config, 'use_flash_attention')}")
+            logger.info(f"Memory efficient attention: {hasattr(base_config, 'use_memory_efficient_attention')}")
+            
+            # Adjust configuration based on model support
+            if not hasattr(base_config, 'use_flash_attention'):
+                config['use_flash_attention'] = False
+                logger.info("Flash attention disabled (not supported)")
+            
+            if hasattr(base_config, 'use_memory_efficient_attention'):
+                config['use_memory_efficient_attention'] = True
+                logger.info("Memory efficient attention enabled")
+                
+        except Exception as e:
+            logger.warning(f"Error checking model optimizations: {str(e)}")
+            logger.warning("Using default optimization configuration")
+        
+        logger.info(f"Final optimization config: {config}")
         return config
 
     def validate_model_compatibility(self) -> None:
@@ -196,16 +215,14 @@ class ModelSettings(BaseModel):
             logger.info(f"Model config type: {type(config)}")
             logger.info(f"Available config attributes: {dir(config)}")
             
-            # Check flash attention support
-            has_flash_support = hasattr(config, 'use_flash_attention')
-            logger.info(f"Flash attention support: {has_flash_support}")
+            # Verify optimization support
+            optimizations = self.get_optimization_config()
+            logger.info(f"Optimization configuration: {optimizations}")
             
-            if self.flash_attention_config['enabled'] and not has_flash_support:
-                logger.warning(
-                    f"Flash attention enabled but not supported by {self.name}. "
-                    "Will use default attention mechanism."
-                )
-                
+            # Log specific warnings for unsupported features
+            if optimizations.get('use_flash_attention') and not hasattr(config, 'use_flash_attention'):
+                logger.warning("Flash attention requested but not supported by model")
+            
         except Exception as e:
             logger.error(f"Error validating model compatibility: {str(e)}")
             raise ValueError(f"Model compatibility validation failed: {str(e)}")
@@ -214,7 +231,7 @@ class ModelSettings(BaseModel):
         super().__init__(**data)
         logger.info("=== ModelSettings Initialization ===")
         logger.info(f"Received fields: {list(data.keys())}")
-        logger.info(f"Flash attention config: {self.flash_attention_config}")
+        logger.info(f"Optimization config: {self.optimization_config}")
         logger.info(f"Initialized fields: {self.model_dump().keys()}")
         
         # Validate compatibility

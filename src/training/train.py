@@ -83,18 +83,35 @@ def train_model(config_path: Union[str, Path]) -> None:
         # Initialize model with enhanced state verification
         logger.info("=== Model Initialization ===")
         try:
-            # Get base configuration
-            base_model_config = training_config.model.get_base_config()
+            # Verify Unsloth configuration
+            logger.info("=== Unsloth Configuration Verification ===")
+            import unsloth
+            logger.info(f"Unsloth version: {unsloth.__version__}")
+            logger.info(f"Available optimizations: {[m for m in dir(unsloth) if 'fast' in m.lower()]}")
+            logger.info(f"Available model types: {[m for m in dir(unsloth.models) if not m.startswith('_')]}")
+
+            # Verify model configuration
+            from transformers import AutoConfig
+            logger.info("=== Model Configuration Verification ===")
+            base_config = AutoConfig.from_pretrained(
+                training_config.model.name,
+                trust_remote_code=True
+            )
+            logger.info(f"Model architecture: {base_config.architectures if hasattr(base_config, 'architectures') else 'Unknown'}")
+            logger.info(f"Model attributes: {dir(base_config)}")
+            logger.info(f"Available attention methods: {[attr for attr in dir(base_config) if 'attention' in attr.lower()]}")
+
+            # Get base configuration without optimizations
+            base_model_config = {
+                'model_name': training_config.model.name,
+                'trust_remote_code': True,
+                'load_in_4bit': training_config.model.load_in_4bit,
+                'max_seq_length': training_config.model.max_seq_length,
+                'gpu_memory_utilization': training_config.model.gpu_memory_utilization
+            }
             logger.info(f"Base model configuration: {base_model_config}")
-            
-            # Get flash attention configuration
-            flash_config = training_config.model.get_flash_attention_config()
-            if flash_config:
-                logger.info(f"Flash attention configuration: {flash_config}")
-            else:
-                logger.info("Flash attention disabled or not supported")
-            
-            # Initialize model with base config first
+
+            # Initialize model first without optimizations
             logger.info("Loading base model...")
             try:
                 result = FastLanguageModel.from_pretrained(
@@ -108,51 +125,51 @@ def train_model(config_path: Union[str, Path]) -> None:
                     model = result
                     tokenizer = None
                     logger.info("Model loaded successfully (no tokenizer)")
-                
+
                 # Verify model state
                 logger.info("=== Model State Verification ===")
                 logger.info(f"Model type: {type(model)}")
-                logger.info(f"Model base class: {model.__class__.__bases__}")
                 logger.info(f"Model config type: {type(model.config)}")
-                logger.info(f"Available config attributes: {dir(model.config)}")
+                logger.info(f"Model device: {next(model.parameters()).device}")
+                logger.info(f"Model dtype: {next(model.parameters()).dtype}")
                 
-                # Apply flash attention if supported
-                if flash_config:
-                    logger.info("Attempting to apply flash attention configuration...")
-                    if hasattr(model.config, 'set_flash_attention'):
-                        model.config.set_flash_attention(**flash_config)
-                        logger.info("Flash attention configuration applied successfully")
-                    else:
-                        logger.warning("Model does not support flash attention configuration")
+                # Check for Unsloth optimizations
+                logger.info("=== Optimization Verification ===")
+                logger.info(f"Available model methods: {[m for m in dir(model) if not m.startswith('_')]}")
+                logger.info(f"Attention implementation: {type(model.get_decoder().layers[0].self_attn) if hasattr(model, 'get_decoder') else 'Unknown'}")
                 
-                # Move model to device
+                # Move to device before applying optimizations
                 if torch.cuda.is_available():
                     model = model.cuda()
-                    logger.info("Model moved to CUDA")
-                    
-                # Apply GRPO patch
-                logger.info("=== GRPO Patch Application ===")
+                    logger.info(f"Model moved to CUDA: {next(model.parameters()).device}")
+
+                # Apply GRPO patch with verification
+                logger.info("=== GRPO Patch Verification ===")
                 try:
-                    PatchFastRL("GRPO", FastLanguageModel)
-                    logger.info("GRPO patch applied successfully")
+                    # Check pre-patch state
+                    pre_patch_methods = set(dir(model))
+                    logger.info(f"Pre-patch training methods: {[m for m in pre_patch_methods if 'train' in m.lower()]}")
                     
-                    # Verify patched state
-                    logger.info("=== Post-Patch Verification ===")
-                    logger.info(f"GRPO methods available: {[m for m in dir(model) if 'grpo' in m.lower()]}")
-                    logger.info(f"Training methods available: {[m for m in dir(model) if 'train' in m.lower()]}")
+                    # Apply patch
+                    PatchFastRL("GRPO", FastLanguageModel)
+                    logger.info("GRPO patch applied")
+                    
+                    # Verify patch effects
+                    post_patch_methods = set(dir(model))
+                    new_methods = post_patch_methods - pre_patch_methods
+                    logger.info(f"New methods after patch: {new_methods}")
                     
                 except Exception as e:
                     logger.error(f"GRPO patching failed: {str(e)}")
-                    logger.error("Stack trace:", exc_info=True)
                     raise
-                
+
                 return model, tokenizer
-                
+
             except Exception as e:
                 logger.error(f"Model loading failed: {str(e)}")
                 logger.error("Stack trace:", exc_info=True)
                 raise
-                
+
         except Exception as e:
             logger.error(f"Model initialization failed: {str(e)}")
             logger.error("Stack trace:", exc_info=True)
