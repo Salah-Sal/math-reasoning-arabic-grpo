@@ -31,11 +31,15 @@ class RewardHandler:
 
     def _normalize_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """Normalize configuration, ensuring weights sum to 1.0."""
+        logger.debug(f"Input config weights: {config.get('weights', {})}")
         if "weights" in config:
             weights = config["weights"]
             total = sum(weights.values())
-            if total != 0:
+            logger.debug(f"Total weight sum before normalization: {total}")
+            # Only normalize if total is significantly different from 1.0
+            if abs(total - 1.0) > 1e-6:
                 config["weights"] = {k: v/total for k, v in weights.items()}
+                logger.debug(f"Normalized weights: {config['weights']}")
         return config
 
     def calculate_rewards(self, completions: List[Dict[str, str]], expected_answer: str) -> List[float]:
@@ -81,19 +85,29 @@ class RewardHandler:
             try:
                 text = completion["content"]
                 reward = 0.0
+                logger.debug(f"Processing XML content: {text}")
                 
-                # Check for required tags
-                if text.count("<تفكير>\n") == 1:
-                    reward += 0.25
-                if text.count("\n</تفكير>\n") == 1:
-                    reward += 0.25
-                if text.count("\n<الجواب>\n") == 1:
-                    reward += 0.25
-                    # Check for extra content
-                    extra = text.split("\n</الجواب>\n")[-1]
-                    reward -= len(extra) * self.config["penalties"]["extra_content"]
-                if text.count("\n</الجواب>") == 1:
-                    reward += 0.25
+                # More stringent scoring for incomplete structures
+                has_thinking_open = "<تفكير>\n" in text
+                has_thinking_close = "\n</تفكير>\n" in text
+                has_answer_open = "\n<الجواب>\n" in text
+                has_answer_close = "\n</الجواب>" in text
+                
+                # Only award points for complete tag pairs
+                if has_thinking_open and has_thinking_close:
+                    reward += 0.5
+                if has_answer_open and has_answer_close:
+                    reward += 0.5
+                    
+                # Apply penalties
+                if text.count("<تفكير>") > 1 or text.count("</تفكير>") > 1:
+                    reward -= self.config["penalties"]["multiple_tags"]
+                
+                extra = text.split("\n</الجواب>")[-1]
+                reward -= len(extra) * self.config["penalties"]["extra_content"]
+                
+                logger.debug(f"XML reward components: thinking={has_thinking_open and has_thinking_close}, "
+                            f"answer={has_answer_open and has_answer_close}, final={reward}")
                 
                 rewards.append(max(0.0, min(1.0, reward)))
             except Exception as e:
@@ -103,26 +117,28 @@ class RewardHandler:
         return rewards
 
     def calculate_format_reward(self, completions: List[Dict[str, str]]) -> List[float]:
-        """Calculate reward for format adherence.
+        """Calculate reward for format adherence."""
+        logger.debug(f"Input completions type: {type(completions)}")
+        logger.debug(f"First completion: {completions[0] if completions else None}")
         
-        Args:
-            completions: List of completion dictionaries
-            
-        Returns:
-            List of float rewards
-        """
-        pattern = r"<تفكير>.*?</تفكير>\s*<الجواب>.*?</الجواب>"
+        pattern = r"<تفكير>\n.*?\n</تفكير>\n<الجواب>\n.*?\n</الجواب>"
         rewards = []
         
         for completion in completions:
             try:
+                # Handle nested list structure in batch processing
+                if isinstance(completion, list):
+                    completion = completion[0]
+                
                 text = completion["content"]
+                logger.debug(f"Processing format for text: {text}")
                 reward = 1.0 if re.match(pattern, text, re.DOTALL) else 0.0
+                logger.debug(f"Format reward: {reward} for pattern match")
                 rewards.append(reward)
             except Exception as e:
                 logger.error(f"Error calculating format reward: {str(e)}")
                 rewards.append(0.0)
-                
+        
         return rewards
 
     def calculate_correctness_reward(self, completions: List[Dict[str, str]], expected_answer: str) -> List[float]:
