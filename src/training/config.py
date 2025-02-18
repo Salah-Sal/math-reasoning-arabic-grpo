@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Optional, Dict, Any, Literal, List
+from typing import Optional, Dict, Any, Literal, List, Union
 from pydantic import BaseModel, Field, validator, ConfigDict
 import yaml
 from src.infrastructure.logging import get_logger
@@ -84,9 +84,9 @@ class MemorySettings(BaseModel):
         le=1.0,
         description="Target GPU memory utilization"
     )
-    use_gradient_checkpointing: bool = Field(
+    use_gradient_checkpointing: Union[bool, Literal["unsloth"]] = Field(
         default=True,
-        description="Whether to use gradient checkpointing"
+        description="Whether to use gradient checkpointing or Unsloth's implementation"
     )
     optimize_memory_use: bool = Field(
         default=True,
@@ -102,12 +102,17 @@ class MemorySettings(BaseModel):
         description="Data type for training"
     )
 
+    model_config = ConfigDict(
+        extra='allow',  # Allow extra fields
+        validate_assignment=True
+    )
+
 class ModelSettings(BaseModel):
     """Model configuration settings."""
     name: str = Field(
         default="Qwen/Qwen2.5-1.5B-Instruct",
         description="Name or path of the model to use",
-        alias="model_name"  # Allow both name and model_name
+        alias="model_name"
     )
     max_seq_length: int = Field(
         default=384,
@@ -124,6 +129,10 @@ class ModelSettings(BaseModel):
     gpu_memory_utilization: float = Field(
         default=0.7,
         description="GPU memory utilization target"
+    )
+    use_flash_attention: bool = Field(
+        default=True,
+        description="Whether to use flash attention"
     )
     # Add LoRA configuration fields
     lora_rank: int = Field(
@@ -146,56 +155,37 @@ class ModelSettings(BaseModel):
 
     model_config = ConfigDict(
         extra='allow',  # Allow extra fields
-        validate_assignment=True,  # Validate during assignment
-        populate_by_name=True,  # Allow population by field name or alias
-        alias_generator=None  # No automatic alias generation
+        validate_assignment=True,
+        populate_by_name=True
     )
 
-    @property
-    def model_name(self) -> str:
-        """Alias for name to maintain backward compatibility."""
-        return self.name
+    @validator('use_gradient_checkpointing', pre=True)
+    def validate_gradient_checkpointing(cls, v):
+        """Validate gradient checkpointing setting."""
+        if isinstance(v, str) and v.lower() == 'unsloth':
+            return 'unsloth'
+        return bool(v)
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ModelSettings":
-        """Create instance from dictionary with logging."""
+        """Create instance from dictionary with enhanced logging."""
         logger.info("=== Creating ModelSettings from dict ===")
         logger.info(f"Input data: {data}")
-        logger.info(f"Available fields: {cls.__fields__.keys()}")
         
-        # Handle field name mapping
-        if 'model_name' in data and 'name' not in data:
-            logger.info("Converting 'model_name' to 'name'")
-            data['name'] = data.pop('model_name')
-        
-        # Log field mapping
-        logger.info("=== Field Mapping ===")
-        for key in data:
-            field_info = cls.__fields__.get(key)
-            if field_info:
-                logger.info(f"Field '{key}': alias={field_info.alias}, type={field_info.annotation}")
-            else:
-                logger.warning(f"Extra field '{key}' not in model definition")
-        
-        # Log any extra fields not in model
-        extra_fields = set(data.keys()) - set(cls.__fields__.keys())
-        if extra_fields:
-            logger.warning(f"Extra fields found in data: {extra_fields}")
-        
-        # Log LoRA-specific parameters
-        lora_params = {k: v for k, v in data.items() 
-                      if k in ['lora_rank', 'lora_alpha', 'target_modules', 'lora_dropout']}
-        logger.info(f"LoRA parameters found: {lora_params}")
+        # Log validation steps
+        logger.info("=== Validation Steps ===")
+        logger.info(f"Checking required fields: {cls.__fields__.keys()}")
+        logger.info(f"Extra fields in input: {set(data.keys()) - set(cls.__fields__.keys())}")
         
         try:
             instance = cls(**data)
-            logger.info("=== Created Instance ===")
-            logger.info(f"Fields: {instance.model_dump().keys()}")
-            logger.info(f"Model name via property: {instance.model_name}")
-            logger.info(f"Model name via field: {instance.name}")
+            logger.info("=== Validated Settings ===")
+            logger.info(f"Model name: {instance.name}")
+            logger.info(f"Flash attention: {instance.use_flash_attention}")
+            logger.info(f"LoRA config: rank={instance.lora_rank}, alpha={instance.lora_alpha}")
             return instance
         except Exception as e:
-            logger.error(f"Error creating ModelSettings instance: {str(e)}", exc_info=True)
+            logger.error(f"Validation error: {str(e)}")
             raise
 
     def model_dump(self) -> Dict[str, Any]:
@@ -338,55 +328,50 @@ class GRPOConfig(BaseModel):
         description="Early stopping settings"
     )
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        extra='allow'
+    )
 
     @classmethod
     def from_yaml(cls, config_path: Path) -> "GRPOConfig":
-        """Load configuration from YAML file with enhanced logging."""
+        """Load configuration from YAML file with enhanced logging and validation."""
         try:
             logger.info(f"Loading configuration from {config_path}")
             with open(config_path, 'r') as f:
                 config_dict = yaml.safe_load(f)
-            logger.info(f"Loaded raw configuration: {config_dict}")
             
-            # Verify model configuration section
-            logger.info("=== Model Configuration Verification ===")
-            if 'model' not in config_dict:
-                logger.warning("No 'model' section found in config, using defaults")
-                config_dict['model'] = {}
+            # Log raw configuration
+            logger.info("=== Raw Configuration ===")
+            logger.info(f"Loaded sections: {list(config_dict.keys())}")
             
-            model_config = config_dict.get('model', {})
-            logger.info(f"Model config keys: {model_config.keys()}")
+            # Validate and convert paths
+            if 'paths' in config_dict:
+                logger.info("Converting path strings to Path objects")
+                for key, value in config_dict['paths'].items():
+                    if value:
+                        config_dict['paths'][key] = Path(value)
             
-            # Create ModelSettings first with detailed logging
-            logger.info("Creating ModelSettings instance...")
-            model_settings = ModelSettings.from_dict(model_config)
-            config_dict['model'] = model_settings.model_dump()
+            # Validate memory settings
+            if 'memory' in config_dict:
+                logger.info("Validating memory settings")
+                memory_config = config_dict['memory']
+                logger.info(f"Memory configuration: {memory_config}")
+                
+                # Handle gradient checkpointing
+                if 'use_gradient_checkpointing' in memory_config:
+                    value = memory_config['use_gradient_checkpointing']
+                    logger.info(f"Gradient checkpointing value: {value}")
             
-            # Create main config
+            # Create config instance
             config = cls(**config_dict)
-            logger.info("=== Final Configuration Verification ===")
+            
+            # Log final configuration
+            logger.info("=== Validated Configuration ===")
             logger.info(f"Model settings: {config.model.model_dump()}")
-            logger.info(f"LoRA settings present: {hasattr(config.model, 'lora_rank')}")
+            logger.info(f"Memory settings: {config.memory.model_dump()}")
             
             return config
         except Exception as e:
-            logger.error(f"Error loading configuration: {str(e)}", exc_info=True)
-            raise
-
-    def save_to_yaml(self, config_path: Path) -> None:
-        """Save configuration to YAML file."""
-        try:
-            # Convert to dict and handle Path objects
-            config_dict = self.model_dump()
-            config_dict["paths"] = {
-                k: str(v) for k, v in config_dict["paths"].items()
-                if v is not None
-            }
-            
-            with open(config_path, 'w') as f:
-                yaml.dump(config_dict, f)
-            logger.info(f"Saved configuration to {config_path}")
-        except Exception as e:
-            logger.error(f"Error saving configuration to {config_path}: {str(e)}")
+            logger.error(f"Configuration loading failed: {str(e)}", exc_info=True)
             raise 
