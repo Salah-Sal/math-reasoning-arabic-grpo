@@ -76,23 +76,27 @@ def train_model(config_path: Union[str, Path]) -> None:
         logger.info(f"FastLanguageModel attributes: {dir(FastLanguageModel)}")
         logger.info(f"PatchFastRL attributes: {dir(PatchFastRL)}")
         
+        # Remove global patch
+        logger.info("Step 0: Checking if global patch was applied")
+        logger.info(f"FastLanguageModel patched status: {getattr(FastLanguageModel, '_is_patched', False)}")
+        
+        # First load configuration
+        logger.info("Step 1: Loading model configuration")
+        from transformers import AutoConfig
+        config = AutoConfig.from_pretrained(
+            model_config['model_name'],
+            trust_remote_code=True,
+            cache_dir=model_config.get('cache_dir')
+        )
+        logger.info(f"Loaded config type: {type(config)}")
+        logger.info(f"Config attributes: {dir(config)}")
+        
+        # Track variables for debugging
+        model = None
+        tokenizer = None
+        
+        logger.info("Step 2: Initializing FastLanguageModel")
         try:
-            # Remove global patch
-            logger.info("Step 0: Checking if global patch was applied")
-            logger.info(f"FastLanguageModel patched status: {getattr(FastLanguageModel, '_is_patched', False)}")
-            
-            # First load configuration
-            logger.info("Step 1: Loading model configuration")
-            from transformers import AutoConfig
-            config = AutoConfig.from_pretrained(
-                model_config['model_name'],
-                trust_remote_code=True,
-                cache_dir=model_config.get('cache_dir')
-            )
-            logger.info(f"Loaded config type: {type(config)}")
-            logger.info(f"Config attributes: {dir(config)}")
-            
-            logger.info("Step 2: Initializing FastLanguageModel")
             result = FastLanguageModel.from_pretrained(**model_config)
             logger.info(f"FastLanguageModel.from_pretrained return type: {type(result)}")
             
@@ -106,57 +110,73 @@ def train_model(config_path: Union[str, Path]) -> None:
                 logger.info("Result is not a tuple, using as is")
                 model = result
             
-            logger.info(f"Model type after initialization: {type(model)}")
-            logger.info(f"Model attributes: {dir(model)}")
+            # Verify unpacking
+            logger.info("=== Variable State After Unpacking ===")
+            logger.info(f"Model variable type: {type(model)}")
+            logger.info(f"Tokenizer variable type: {type(tokenizer)}")
             
-            # Set configuration if needed
-            if not hasattr(model, 'config'):
-                logger.info("Setting model configuration")
-                model.config = config
-                logger.info(f"Config set successfully: {hasattr(model, 'config')}")
+            if model is None:
+                raise ValueError("Model initialization failed - model is None")
+            if tokenizer is None:
+                raise ValueError("Model initialization failed - tokenizer is None")
             
-            logger.info("Step 3: Applying PatchFastRL")
+        except Exception as e:
+            logger.error(f"Error during model initialization: {str(e)}")
+            raise
+        
+        logger.info(f"Model type after initialization: {type(model)}")
+        logger.info(f"Model attributes: {dir(model)}")
+        
+        # Set configuration if needed
+        if not hasattr(model, 'config'):
+            logger.info("Setting model configuration")
+            model.config = config
+            logger.info(f"Config set successfully: {hasattr(model, 'config')}")
+        
+        # Store original model for backup
+        original_model = model
+        logger.info("Stored original model for backup")
+        
+        logger.info("Step 3: Applying PatchFastRL")
+        try:
             patched_model = PatchFastRL(model)
             logger.info(f"PatchFastRL return type: {type(patched_model)}")
             
             # Handle different return types from PatchFastRL
-            if callable(patched_model):
+            if patched_model is None:
+                logger.warning("PatchFastRL returned None, using original model")
+                model = original_model
+            elif callable(patched_model):
                 logger.info("PatchFastRL returned a function, applying it to model")
                 model = patched_model(model)
             else:
                 logger.info("PatchFastRL returned a model directly")
                 model = patched_model
             
-            logger.info(f"Final model type: {type(model)}")
-            logger.info(f"Final model attributes: {dir(model)}")
-            logger.info(f"Final model config present: {hasattr(model, 'config')}")
-            if hasattr(model, 'config'):
-                logger.info(f"Final config attributes: {dir(model.config)}")
+            logger.info(f"Model type after patching: {type(model)}")
             
-            # Store tokenizer for later use
-            model.tokenizer = tokenizer
-            logger.info("Tokenizer attached to model")
-            
-            # Verify model configuration
-            logger.info("=== Model Configuration Verification ===")
-            if hasattr(model, 'config'):
-                logger.info(f"Config type: {type(model.config)}")
-                logger.info(f"Config attributes: {dir(model.config)}")
-                logger.info(f"torch_dtype present: {hasattr(model.config, 'torch_dtype')}")
-                if hasattr(model.config, 'torch_dtype'):
-                    logger.info(f"torch_dtype value: {model.config.torch_dtype}")
-            else:
-                logger.error("Model configuration is still missing after fixes!")
-                raise ValueError("Model configuration could not be initialized")
-                
-            # Verify model state
-            logger.info("=== Model State Verification ===")
-            logger.info(f"Model device: {next(model.parameters()).device if hasattr(model, 'parameters') else 'No parameters'}")
-            logger.info(f"Model training mode: {model.training if hasattr(model, 'training') else 'Unknown'}")
+            if model is None:
+                raise ValueError("Patching failed - model is None")
             
         except Exception as e:
-            logger.error(f"Error during model initialization: {str(e)}", exc_info=True)
-            raise
+            logger.error(f"Error during model patching: {str(e)}")
+            logger.info("Falling back to original model")
+            model = original_model
+        
+        logger.info(f"Final model type: {type(model)}")
+        logger.info(f"Final model attributes: {dir(model)}")
+        
+        # Verify model and tokenizer before attachment
+        logger.info("=== Final State Verification ===")
+        logger.info(f"Model is None: {model is None}")
+        logger.info(f"Tokenizer is None: {tokenizer is None}")
+        
+        if model is not None and tokenizer is not None:
+            # Store tokenizer for later use
+            model.tokenizer = tokenizer
+            logger.info("Tokenizer attached to model successfully")
+        else:
+            raise ValueError("Cannot attach tokenizer - model or tokenizer is None")
         
         monitor.log_model_info(model)
         
