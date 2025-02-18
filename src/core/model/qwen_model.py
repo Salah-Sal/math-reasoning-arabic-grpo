@@ -76,6 +76,7 @@ class QwenModel(BaseLanguageModel):
         
         try:
             logger.info("Setting up PEFT configuration")
+            logger.info(f"Initial model type: {type(self.model)}")
             self.model = FastLanguageModel.get_peft_model(
                 self.model,
                 r=lora_rank,
@@ -85,10 +86,12 @@ class QwenModel(BaseLanguageModel):
                 random_state=random_state,
                 **kwargs
             )
-            logger.info("PEFT setup completed successfully")
+            logger.info(f"Post-PEFT model type: {type(self.model)}")
+            logger.info(f"Model attributes: {dir(self.model)}")
+            logger.info(f"Model base attributes: {dir(self.model.base_model)}")
             return self.model
         except Exception as e:
-            logger.error(f"Error setting up PEFT: {str(e)}")
+            logger.error(f"PEFT setup failed: {str(e)}")
             raise
 
     def save_model(self,
@@ -104,6 +107,8 @@ class QwenModel(BaseLanguageModel):
             raise ValueError("Model and tokenizer must be loaded before saving")
         
         try:
+            logger.info(f"Saving model of type: {type(self.model)}")
+            logger.info(f"Model hierarchy: {type(self.model)} -> {type(getattr(self.model, 'base_model', None))} -> {type(getattr(getattr(self.model, 'base_model', None), 'model', None))}")
             os.makedirs(output_dir, exist_ok=True)
             logger.info(f"Saving model to {output_dir} using method {save_method}")
             
@@ -120,5 +125,5 @@ class QwenModel(BaseLanguageModel):
             else:
                 raise ValueError(f"Unsupported save method: {save_method}")
         except Exception as e:
-            logger.error(f"Error saving model: {str(e)}")
+            logger.error(f"Save failed: {str(e)}")
             raise 
