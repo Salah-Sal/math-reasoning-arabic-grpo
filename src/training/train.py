@@ -123,14 +123,54 @@ def train_model(config_path: Union[str, Path]) -> None:
         
         # Update base configuration
         base_model_config = {
+            'model_name': training_config.model.name,  # Add model name
             'device_map': 'auto',
-            'torch_dtype': torch.bfloat16,
             'low_cpu_mem_usage': True
         }
         
         # Initialize model with enhanced error handling
         logger.info("=== Model Loading Process ===")
         try:
+            # Log Unsloth configuration
+            logger.info("=== Unsloth Configuration Verification ===")
+            from unsloth.models.loader import dispatch_model
+            
+            logger.info(f"Model name: {base_model_config['model_name']}")
+            logger.info(f"Detected model type: {'qwen' if 'qwen' in base_model_config['model_name'].lower() else 'unknown'}")
+            
+            # Inspect Unsloth's model handling
+            logger.info("=== Model Dispatch Information ===")
+            dispatch_info = {
+                'available_handlers': [m for m in dir(dispatch_model) if not m.startswith('_')],
+                'model_types': getattr(dispatch_model, 'MODEL_TYPES', 'Not found'),
+                'default_dtype': getattr(dispatch_model, 'default_dtype', 'Not found')
+            }
+            logger.info(f"Dispatch info: {dispatch_info}")
+            
+            # Get model-specific configuration
+            logger.info("=== Model-Specific Configuration ===")
+            from transformers import AutoConfig
+            model_config = AutoConfig.from_pretrained(
+                base_model_config['model_name'],
+                trust_remote_code=True
+            )
+            logger.info(f"Model architecture: {model_config.architectures if hasattr(model_config, 'architectures') else 'Unknown'}")
+            logger.info(f"Model config type: {type(model_config).__name__}")
+            
+            # Check if bfloat16 is supported
+            bf16_supported = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+            logger.info(f"bfloat16 support: {bf16_supported}")
+            
+            # Set dtype based on support
+            if bf16_supported:
+                base_model_config['torch_dtype'] = torch.bfloat16
+                logger.info("Using bfloat16 for model")
+            else:
+                base_model_config['torch_dtype'] = torch.float16
+                logger.info("Falling back to float16")
+            
+            # Initialize model
+            logger.info(f"Final model config: {base_model_config}")
             result = FastLanguageModel.from_pretrained(**base_model_config)
             
             if result is None:
