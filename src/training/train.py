@@ -15,6 +15,53 @@ logger = get_logger(__name__)
 # Remove global patch - we'll handle it at instance level
 # PatchFastRL("GRPO", FastLanguageModel)
 
+def get_unsloth_version() -> str:
+    """Safely get Unsloth version from multiple sources."""
+    try:
+        import unsloth
+        import pkg_resources
+        
+        # Try different methods to get version
+        version_sources = []
+        
+        # Method 1: Direct attribute
+        if hasattr(unsloth, 'VERSION'):
+            version_sources.append(('VERSION attribute', unsloth.VERSION))
+        
+        # Method 2: Package metadata
+        try:
+            dist = pkg_resources.get_distribution('unsloth')
+            version_sources.append(('pkg_resources', dist.version))
+        except Exception:
+            pass
+        
+        # Method 3: Module dictionary
+        version_attrs = {k: v for k, v in unsloth.__dict__.items() if 'version' in k.lower()}
+        for key, value in version_attrs.items():
+            version_sources.append((f'module dict ({key})', value))
+        
+        # Method 4: File path version indicator
+        if hasattr(unsloth, '__file__'):
+            file_path = unsloth.__file__
+            if 'site-packages' in file_path:
+                version_from_path = file_path.split('site-packages/')[1].split('/')[0]
+                if 'unsloth' in version_from_path:
+                    version_sources.append(('file path', version_from_path))
+        
+        # Log all found versions
+        logger.debug(f"Found version sources: {version_sources}")
+        
+        # Return first valid version found
+        for source, version in version_sources:
+            if version:
+                logger.info(f"Using version from {source}: {version}")
+                return str(version)
+        
+        return "Unknown"
+    except Exception as e:
+        logger.warning(f"Error getting Unsloth version: {str(e)}")
+        return "Unknown"
+
 def train_model(config_path: Union[str, Path]) -> None:
     """Train the model using the specified configuration.
     
@@ -117,10 +164,21 @@ def train_model(config_path: Union[str, Path]) -> None:
         try:
             # Verify Unsloth configuration
             logger.info("=== Unsloth Configuration Verification ===")
-            import unsloth
-            logger.info(f"Unsloth version: {unsloth.__version__}")
-            logger.info(f"Available optimizations: {[m for m in dir(unsloth) if 'fast' in m.lower()]}")
-            logger.info(f"Available model types: {[m for m in dir(unsloth.models) if not m.startswith('_')]}")
+            
+            # Get and log version information
+            logger.info("=== Version Information ===")
+            version = get_unsloth_version()
+            logger.info(f"Detected Unsloth version: {version}")
+            
+            # Log available features
+            logger.info("=== Available Features ===")
+            features = {
+                'fast_language_model': hasattr(unsloth, 'FastLanguageModel'),
+                'patch_fast_rl': hasattr(unsloth, 'PatchFastRL'),
+                'models': hasattr(unsloth, 'models'),
+                'optimizations': [m for m in dir(unsloth) if 'fast' in m.lower()]
+            }
+            logger.info(f"Available features: {features}")
 
             # Verify model configuration
             from transformers import AutoConfig
