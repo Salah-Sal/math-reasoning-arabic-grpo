@@ -37,54 +37,104 @@ class TrainingMonitor(TrainerCallback, BaseCallback):
         self.start_time = None
         self.best_reward = float('-inf')
         self.training_steps = 0
+        self._model = None
         
-        logger.info("Initialized TrainingMonitor with HuggingFace Trainer compatibility")
+        logger.info("Initialized TrainingMonitor with GRPO compatibility")
     
-    def on_init_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl) -> TrainerControl:
-        """Called at the end of trainer initialization."""
+    def on_init_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs) -> TrainerControl:
+        """Called at the end of trainer initialization.
+        
+        Note: Added **kwargs to handle additional arguments from GRPO trainer.
+        """
         logger.info("=== Trainer Initialization Complete ===")
         logger.info(f"Training Arguments: {args}")
         logger.info(f"Initial State: {state}")
+        logger.info(f"Additional kwargs: {kwargs}")
+        
+        # Store model reference if provided
+        if 'model' in kwargs:
+            self._model = kwargs['model']
+            self.log_model_info(self._model)
+        
         self.log_system_info()
         return control
     
-    def on_train_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl) -> TrainerControl:
+    def on_train_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs) -> TrainerControl:
         """Called at the beginning of training."""
         self.start_time = datetime.now()
         logger.info(f"Training started at {self.start_time}")
         logger.info(f"Training Arguments: {args}")
+        logger.info(f"Additional kwargs: {kwargs}")
+        
+        # Log GRPO-specific information
+        if hasattr(args, 'grpo_config'):
+            logger.info("=== GRPO Configuration ===")
+            logger.info(f"GRPO Config: {args.grpo_config}")
+        
         return control
     
-    def on_train_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl) -> TrainerControl:
-        """Called at the end of training."""
-        end_time = datetime.now()
-        duration = end_time - self.start_time
-        logger.info("=== Training Summary ===")
-        logger.info(f"Training completed at: {end_time}")
-        logger.info(f"Total duration: {duration}")
-        logger.info(f"Total steps: {state.global_step}")
-        logger.info(f"Best reward achieved: {self.best_reward}")
-        return control
-    
-    def on_step_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl) -> TrainerControl:
+    def on_step_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs) -> TrainerControl:
         """Called at the beginning of each step."""
         if state.global_step % args.logging_steps == 0:
             self._log_memory_stats()
+            
+            # Log GRPO-specific metrics if available
+            if 'metrics' in kwargs:
+                logger.info("=== GRPO Step Metrics ===")
+                for key, value in kwargs['metrics'].items():
+                    logger.info(f"{key}: {value}")
+        
         return control
     
-    def on_step_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl) -> TrainerControl:
+    def on_step_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs) -> TrainerControl:
         """Called at the end of each step."""
         self.training_steps += 1
+        
         if self.training_steps % args.logging_steps == 0:
-            logger.info(f"Step {self.training_steps}: loss={state.log_history[-1].get('loss', 'N/A')}")
+            # Log standard metrics
+            if state.log_history:
+                logger.info(f"Step {self.training_steps}: loss={state.log_history[-1].get('loss', 'N/A')}")
+            
+            # Log GRPO-specific metrics
+            if 'reward' in kwargs:
+                current_reward = kwargs['reward']
+                logger.info(f"Current reward: {current_reward}")
+                if current_reward > self.best_reward:
+                    self.best_reward = current_reward
+                    logger.info(f"New best reward: {self.best_reward}")
+        
         return control
     
-    def on_evaluate(self, args: TrainingArguments, state: TrainerState, control: TrainerControl) -> TrainerControl:
+    def on_evaluate(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs) -> TrainerControl:
         """Called during evaluation."""
         logger.info("=== Evaluation ===")
         if state.log_history:
             metrics = state.log_history[-1]
             logger.info(f"Evaluation metrics: {metrics}")
+        
+        # Log GRPO-specific evaluation metrics
+        if 'grpo_metrics' in kwargs:
+            logger.info("=== GRPO Evaluation Metrics ===")
+            logger.info(f"GRPO Metrics: {kwargs['grpo_metrics']}")
+        
+        return control
+    
+    def on_train_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs) -> TrainerControl:
+        """Called at the end of training."""
+        end_time = datetime.now()
+        duration = end_time - self.start_time
+        
+        logger.info("=== Training Summary ===")
+        logger.info(f"Training completed at: {end_time}")
+        logger.info(f"Total duration: {duration}")
+        logger.info(f"Total steps: {state.global_step}")
+        logger.info(f"Best reward achieved: {self.best_reward}")
+        
+        # Log final GRPO metrics if available
+        if 'final_metrics' in kwargs:
+            logger.info("=== Final GRPO Metrics ===")
+            logger.info(f"Final Metrics: {kwargs['final_metrics']}")
+        
         return control
     
     def _log_memory_stats(self):
