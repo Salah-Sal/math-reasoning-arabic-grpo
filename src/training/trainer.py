@@ -5,25 +5,13 @@ from unsloth import FastLanguageModel
 from src.infrastructure.config import ProjectConfig
 from src.infrastructure.logging import get_logger
 from src.data.dataset import ArabicMathDataset
+import traceback
 
 logger = get_logger(__name__)
 
 class Trainer:
     """Trainer class for the Arabic Math Reasoning model."""
     
-    def _adjust_config_for_gpu(self, config: ProjectConfig) -> ProjectConfig:
-        """Create a new config with adjusted settings for GPU constraints"""
-        config_dict = config.model_dump()
-        if torch.cuda.get_device_properties(0).total_memory < 10 * 1024**3:
-            # For 8GB GPUs, use conservative settings that work well with vLLM
-            config_dict['model']['max_seq_length'] = 256
-            config_dict['model']['gpu_memory_utilization'] = 0.6  # Let vLLM manage memory
-            config_dict['training']['per_device_train_batch_size'] = 1
-            config_dict['training']['gradient_accumulation_steps'] = 1
-            config_dict['training']['num_generations'] = 4
-            logger.info("Adjusted settings for 8GB GPU")
-        return ProjectConfig(**config_dict)
-
     def __init__(
         self,
         config: ProjectConfig,
@@ -37,7 +25,7 @@ class Trainer:
             poc_mode: Whether to run in proof-of-concept mode
             output_dir: Directory for saving outputs
         """
-        self.config = self._adjust_config_for_gpu(config)
+        self.config = config
         self._validate_config(self.config)
         
         self.poc_mode = poc_mode
@@ -59,15 +47,13 @@ class Trainer:
             raise ValueError("Batch size must be positive")
     
     def _initialize_model(self):
-        """Initialize the model and tokenizer."""
+        """Initialize the model and tokenizer using vLLM for memory management."""
         try:
             logger.info("Starting model initialization...")
             logger.info(f"Model name: {self.config.model.model_name}")
-            logger.info(f"Model config: max_seq_length={self.config.model.max_seq_length}, "
-                        f"load_in_4bit={self.config.model.load_in_4bit}, "
-                        f"gpu_memory_utilization={self.config.model.gpu_memory_utilization}")
+            logger.info(f"Model config: {self.config.model.model_dump()}")
             
-            # Let vLLM handle memory management
+            logger.info("Creating FastLanguageModel instance with vLLM...")
             self.model, self.tokenizer = FastLanguageModel.from_pretrained(
                 model_name=self.config.model.model_name,
                 max_seq_length=self.config.model.max_seq_length,
@@ -83,6 +69,8 @@ class Trainer:
             
         except Exception as e:
             logger.error(f"Failed to initialize model: {str(e)}")
+            logger.error(f"Exception type: {type(e)}")
+            logger.error(f"Exception traceback: {traceback.format_exc()}")
             raise
     
     def prepare_dataset(self, dataset: ArabicMathDataset):

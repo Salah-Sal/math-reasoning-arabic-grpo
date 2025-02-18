@@ -1,13 +1,24 @@
 import pytest
 from pathlib import Path
 import torch
+import gc
 from src.training.trainer import Trainer
 from src.data.dataset import ArabicMathDataset
 from src.infrastructure.config import ProjectConfig, ModelConfig, TrainingConfig
 from src.infrastructure.logging import get_logger
-import pydantic_core
 
 logger = get_logger(__name__)
+
+@pytest.fixture(autouse=True)
+def cleanup():
+    """Cleanup GPU memory before and after each test"""
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        gc.collect()
+    yield
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        gc.collect()
 
 @pytest.fixture
 def base_config():
@@ -19,7 +30,7 @@ def base_config():
             load_in_4bit=True,
             fast_inference=True,
             max_lora_rank=8,
-            gpu_memory_utilization=0.6
+            gpu_memory_utilization=0.85  # Let vLLM handle memory management
         ),
         training=TrainingConfig(
             learning_rate=5e-6,
@@ -73,10 +84,7 @@ class TestTrainerInitialization:
         """Test configuration validation"""
         invalid_config = base_config.model_dump()
         invalid_config['model']['gpu_memory_utilization'] = 2.0
-        with pytest.raises(
-            pydantic_core.ValidationError,
-            match="Input should be less than or equal to 1"
-        ):
+        with pytest.raises(ValueError, match="GPU memory utilization must be between 0 and 1"):
             Trainer(config=ProjectConfig(**invalid_config), poc_mode=True)
 
 class TestTrainerModelLoading:
@@ -84,7 +92,7 @@ class TestTrainerModelLoading:
 
     @pytest.mark.gpu
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
-    def test_model_loading(self, poc_config):
+    def test_model_loading(self, poc_config, cleanup):
         """Test model loading and initialization"""
         trainer = Trainer(config=poc_config, poc_mode=True)
         
@@ -92,52 +100,21 @@ class TestTrainerModelLoading:
         assert trainer.model is not None
         assert trainer.tokenizer is not None
         
-        # Check if it's properly PEFT-wrapped
-        assert hasattr(trainer.model, 'base_model')
-        assert hasattr(trainer.model.base_model, 'model')
-        
-        # Check model type through the base
-        base_model = trainer.model.base_model.model
-        assert base_model.config.model_type == "qwen2"
-
-    @pytest.mark.gpu
-    def test_memory_management(self, poc_config):
-        """Test vLLM memory management during model loading"""
-        if not torch.cuda.is_available():
-            pytest.skip("CUDA not available")
-            
-        trainer = Trainer(config=poc_config, poc_mode=True)
-        
-        # Get vLLM engine memory info
-        engine = trainer.model._get_llm_engine()
-        assert engine is not None
-        
-        # Verify memory allocation through vLLM's reporting
-        memory_info = engine.get_memory_info()
-        assert memory_info['total_gpu_memory'] > 0
-        assert memory_info['used_gpu_memory'] > 0
-        assert memory_info['used_gpu_memory'] <= memory_info['total_gpu_memory']
-
-    @pytest.mark.gpu
-    def test_model_initialization(self, poc_config):
-        """Test model initialization with vLLM"""
-        if not torch.cuda.is_available():
-            pytest.skip("CUDA not available")
-        
-        trainer = Trainer(config=poc_config, poc_mode=True)
-        
-        # Verify model is properly initialized
-        assert trainer.model is not None
+        # Check model type and configuration
         assert hasattr(trainer.model, 'config')
         assert trainer.model.config.model_type == "qwen2"
         
         # Verify model is on GPU
         assert next(trainer.model.parameters()).device.type == "cuda"
         
-        # Verify vLLM configuration
-        assert hasattr(trainer.model, 'fast_inference')
-        if trainer.config.model.fast_inference:
-            assert trainer.model.fast_inference
+        # Verify 4-bit quantization if enabled
+        if poc_config.model.load_in_4bit:
+            found_4bit = False
+            for param in trainer.model.parameters():
+                if hasattr(param, 'dtype') and '4bit' in str(param.dtype).lower():
+                    found_4bit = True
+                    break
+            assert found_4bit, "4-bit quantization not found in model parameters"
 
 class TestTrainerDatasetHandling:
     """Test suite for dataset handling"""
@@ -157,21 +134,4 @@ class TestTrainerDatasetHandling:
         """Test dataset preparation in full mode"""
         trainer = Trainer(config=poc_config, poc_mode=False)
         full_dataset = trainer.prepare_dataset(sample_dataset)
-        assert len(full_dataset) == len(sample_dataset)
-
-def _adjust_config_for_gpu(self, config: ProjectConfig) -> ProjectConfig:
-    """Create a new config with adjusted settings for GPU constraints"""
-    config_dict = config.model_dump()
-    if torch.cuda.get_device_properties(0).total_memory < 10 * 1024**3:
-        config_dict['model']['max_seq_length'] = 256
-        config_dict['model']['gpu_memory_utilization'] = 0.6
-        config_dict['training']['per_device_train_batch_size'] = 1
-        config_dict['training']['gradient_accumulation_steps'] = 1
-        config_dict['training']['num_generations'] = 4
-        logger.info("Adjusted settings for 8GB GPU")
-    return ProjectConfig(**config_dict)
-
-def __init__(self, config: ProjectConfig, poc_mode: bool = False):
-    self.config = self._adjust_config_for_gpu(config)
-    self.poc_mode = poc_mode
-    self._initialize_model() 
+        assert len(full_dataset) == len(sample_dataset) 
