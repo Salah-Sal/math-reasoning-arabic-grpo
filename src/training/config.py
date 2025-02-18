@@ -106,7 +106,8 @@ class ModelSettings(BaseModel):
     """Model configuration settings."""
     name: str = Field(
         default="Qwen/Qwen2.5-1.5B-Instruct",
-        description="Name or path of the model to use"
+        description="Name or path of the model to use",
+        alias="model_name"  # Allow both name and model_name
     )
     max_seq_length: int = Field(
         default=384,
@@ -145,8 +146,15 @@ class ModelSettings(BaseModel):
 
     model_config = ConfigDict(
         extra='allow',  # Allow extra fields
-        validate_assignment=True  # Validate during assignment
+        validate_assignment=True,  # Validate during assignment
+        populate_by_name=True,  # Allow population by field name or alias
+        alias_generator=None  # No automatic alias generation
     )
+
+    @property
+    def model_name(self) -> str:
+        """Alias for name to maintain backward compatibility."""
+        return self.name
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ModelSettings":
@@ -154,6 +162,20 @@ class ModelSettings(BaseModel):
         logger.info("=== Creating ModelSettings from dict ===")
         logger.info(f"Input data: {data}")
         logger.info(f"Available fields: {cls.__fields__.keys()}")
+        
+        # Handle field name mapping
+        if 'model_name' in data and 'name' not in data:
+            logger.info("Converting 'model_name' to 'name'")
+            data['name'] = data.pop('model_name')
+        
+        # Log field mapping
+        logger.info("=== Field Mapping ===")
+        for key in data:
+            field_info = cls.__fields__.get(key)
+            if field_info:
+                logger.info(f"Field '{key}': alias={field_info.alias}, type={field_info.annotation}")
+            else:
+                logger.warning(f"Extra field '{key}' not in model definition")
         
         # Log any extra fields not in model
         extra_fields = set(data.keys()) - set(cls.__fields__.keys())
@@ -165,9 +187,24 @@ class ModelSettings(BaseModel):
                       if k in ['lora_rank', 'lora_alpha', 'target_modules', 'lora_dropout']}
         logger.info(f"LoRA parameters found: {lora_params}")
         
-        instance = cls(**data)
-        logger.info(f"Created instance with fields: {instance.model_dump().keys()}")
-        return instance
+        try:
+            instance = cls(**data)
+            logger.info("=== Created Instance ===")
+            logger.info(f"Fields: {instance.model_dump().keys()}")
+            logger.info(f"Model name via property: {instance.model_name}")
+            logger.info(f"Model name via field: {instance.name}")
+            return instance
+        except Exception as e:
+            logger.error(f"Error creating ModelSettings instance: {str(e)}", exc_info=True)
+            raise
+
+    def model_dump(self) -> Dict[str, Any]:
+        """Enhanced model dump with logging."""
+        data = super().model_dump()
+        logger.info("=== Model Settings Dump ===")
+        for key, value in data.items():
+            logger.info(f"  {key}: {value}")
+        return data
 
 class RewardWeights(BaseModel):
     """Reward function weights."""
