@@ -58,6 +58,24 @@ def train_model(config_path: Union[str, Path]) -> None:
         }
         logger.info(f"Attempting to initialize model with config: {model_config}")
         
+        # Verify reward configuration
+        logger.info("=== Reward Configuration Verification ===")
+        logger.info(f"Reward config present: {hasattr(config, 'reward')}")
+        if hasattr(config, 'reward'):
+            logger.info(f"Reward settings: {config.reward.model_dump()}")
+            logger.info(f"Reward weights: {config.reward.weights.model_dump()}")
+        
+        # Initialize reward handler
+        from src.training.reward_handler import RewardHandler
+        logger.info("Initializing RewardHandler...")
+        reward_handler = RewardHandler(config.reward.model_dump())
+        logger.info(f"RewardHandler initialized with config: {reward_handler.config}")
+        
+        # Verify Unsloth patch and GRPO requirements
+        logger.info("=== GRPO/Unsloth Verification ===")
+        logger.info(f"Available trainer attributes: {dir(GRPOTrainer)}")
+        logger.info(f"Trainer init signature: {GRPOTrainer.__init__.__doc__}")
+        
         model = FastLanguageModel.from_pretrained(**model_config)
         model = PatchFastRL(model)
         
@@ -115,7 +133,7 @@ def train_model(config_path: Union[str, Path]) -> None:
         logger.info(f"Initialized {len(callbacks)} callbacks")
         logger.info("=============================")
         
-        # Initialize trainer with TRL config
+        # Initialize trainer with reward functions
         training_args = TRLConfig(
             learning_rate=config.training.learning_rate,
             max_steps=config.training.max_steps,
@@ -128,12 +146,18 @@ def train_model(config_path: Union[str, Path]) -> None:
             report_to=config.training.report_to
         )
         
+        logger.info("=== Trainer Initialization ===")
+        logger.info(f"Training arguments: {training_args}")
+        logger.info("Initializing GRPO Trainer with reward functions...")
+        
         trainer = GRPOTrainer(
             model=model,
             args=training_args,
             train_dataset=dataset,
-            callbacks=callbacks
+            callbacks=callbacks,
+            reward_funcs=[reward_handler.calculate_rewards]  # Add reward functions
         )
+        logger.info("GRPO Trainer initialized successfully")
         
         # Start training
         trainer.train()
