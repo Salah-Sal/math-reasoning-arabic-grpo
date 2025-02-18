@@ -264,7 +264,23 @@ class GRPOConfig(BaseModel):
                 config_dict = yaml.safe_load(f)
             logger.info(f"Loaded raw configuration: {config_dict}")
             
-            # Convert string paths to Path objects
+            # Verify model configuration section
+            logger.info("=== Model Configuration Verification ===")
+            if 'model' not in config_dict:
+                logger.warning("No 'model' section found in config, using defaults")
+                config_dict['model'] = {}
+            
+            model_config = config_dict.get('model', {})
+            logger.info(f"Model config keys: {model_config.keys()}")
+            
+            # Verify LoRA parameters
+            lora_params = ['lora_rank', 'lora_alpha', 'target_modules', 'lora_dropout']
+            for param in lora_params:
+                if param not in model_config:
+                    logger.warning(f"Missing LoRA parameter '{param}' in config, using default")
+                logger.info(f"{param}: {model_config.get(param, ModelSettings.__fields__[param].default)}")
+            
+            # Convert paths
             if 'paths' in config_dict:
                 paths_config = config_dict['paths']
                 logger.info(f"Processing paths configuration: {paths_config}")
@@ -274,10 +290,14 @@ class GRPOConfig(BaseModel):
                         logger.info(f"Converted {key} to Path: {paths_config[key]}")
             
             config = cls(**config_dict)
+            logger.info("=== Configuration Validation ===")
+            logger.info(f"Model settings: {config.model.model_dump()}")
+            logger.info(f"LoRA settings found: {hasattr(config.model, 'lora_rank')}")
             logger.info(f"Successfully created config object: {config}")
             return config
         except Exception as e:
             logger.error(f"Error loading configuration from {config_path}: {str(e)}")
+            logger.error("Configuration structure:", exc_info=True)
             raise
 
     def save_to_yaml(self, config_path: Path) -> None:
