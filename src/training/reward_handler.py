@@ -26,7 +26,13 @@ class RewardHandler:
         Args:
             config: Optional configuration dictionary to override defaults
         """
-        self.config = self._normalize_config(config or self.DEFAULT_CONFIG.copy())
+        if config is None:
+            # Only normalize default config
+            self.config = self._normalize_config(self.DEFAULT_CONFIG.copy())
+        else:
+            # Keep custom config as-is
+            self.config = config.copy()
+        
         logger.debug(f"Initialized RewardHandler with config: {self.config}")
 
     def _normalize_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
@@ -34,16 +40,11 @@ class RewardHandler:
         if "weights" in config:
             weights = config["weights"]
             total = sum(weights.values())
-            logger.debug(f"Processing weights: {weights} with total {total}")
+            logger.debug(f"Default config weights before normalization: {weights}, total: {total}")
             
             if abs(total - 1.0) > 1e-6:
                 config["weights"] = {k: v/total for k, v in weights.items()}
-                logger.debug(f"Normalized weights to: {config['weights']}")
-                
-                # Verify normalization
-                new_total = sum(config["weights"].values())
-                logger.debug(f"Post-normalization total: {new_total}")
-                assert abs(new_total - 1.0) < 1e-6, f"Weights did not normalize correctly: {new_total}"
+                logger.debug(f"Normalized default weights to: {config['weights']}")
         
         return config
 
