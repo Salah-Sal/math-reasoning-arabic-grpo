@@ -56,16 +56,24 @@ def test_reward_handler_initialization(default_config):
     handler = RewardHandler()
     assert handler.config is not None
     assert all(k in handler.config["weights"] for k in ["xml_structure", "format", "correctness"])
+    assert abs(sum(handler.config["weights"].values()) - 1.0) < 1e-6
     
     # Test custom config
     custom_config = default_config.copy()
-    custom_config["weights"]["xml_structure"] = 0.5
+    original_xml_weight = 0.5
+    custom_config["weights"]["xml_structure"] = original_xml_weight
     handler = RewardHandler(config=custom_config)
-    assert handler.config["weights"]["xml_structure"] == 0.5
     
-    # Test weight normalization
+    # Verify weights are normalized but proportions are maintained
+    total = sum(custom_config["weights"].values())
+    expected_normalized = original_xml_weight / total
+    assert abs(handler.config["weights"]["xml_structure"] - expected_normalized) < 1e-6
+    assert abs(sum(handler.config["weights"].values()) - 1.0) < 1e-6
+    
+    # Verify relative proportions are maintained
     weights = handler.config["weights"]
-    assert abs(sum(weights.values()) - 1.0) < 1e-6
+    assert weights["xml_structure"] > weights["format"]
+    assert weights["xml_structure"] > weights["correctness"]
 
 def test_xml_reward_calculation(sample_completion):
     """Test XML structure reward calculation."""
