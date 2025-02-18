@@ -107,6 +107,27 @@ class TestTrainerModelLoading:
         final_memory = torch.cuda.memory_allocated()
         assert final_memory <= initial_memory
 
+    @pytest.mark.gpu
+    def test_model_initialization(self, poc_config):
+        """Test model initialization with vLLM"""
+        if not torch.cuda.is_available():
+            pytest.skip("CUDA not available")
+        
+        trainer = Trainer(config=poc_config, poc_mode=True)
+        
+        # Verify model is properly initialized
+        assert trainer.model is not None
+        assert hasattr(trainer.model, 'config')
+        assert trainer.model.config.model_type == "qwen2"
+        
+        # Verify model is on GPU
+        assert next(trainer.model.parameters()).device.type == "cuda"
+        
+        # Verify vLLM configuration
+        assert hasattr(trainer.model, 'fast_inference')
+        if trainer.config.model.fast_inference:
+            assert trainer.model.fast_inference
+
 class TestTrainerDatasetHandling:
     """Test suite for dataset handling"""
 

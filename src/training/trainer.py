@@ -38,12 +38,6 @@ class Trainer:
             poc_mode: Whether to run in proof-of-concept mode
             output_dir: Directory for saving outputs
         """
-        # Clear memory before initialization
-        clear_memory()
-        
-        # Force garbage collection and cache clearing
-        torch.cuda.empty_cache()
-        
         # Create adjusted config instead of modifying existing one
         self.config = self._adjust_config_for_gpu(config)
         self._validate_config(self.config)
