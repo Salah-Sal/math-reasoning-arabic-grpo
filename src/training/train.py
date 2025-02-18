@@ -54,14 +54,21 @@ def train_model(config_path: Union[str, Path]) -> None:
         try:
             # Step 1: Load base model with quantization
             logger.info("Step 1: Loading quantized base model")
+            logger.info("=== Model Configuration Verification ===")
+            logger.info(f"Model settings type: {type(training_config.model)}")
+            logger.info(f"Available fields: {training_config.model.model_dump().keys()}")
+            
             model_config = {
-                'model_name': training_config.model.model_name if hasattr(training_config, 'model') else 'Not found in config',
+                'model_name': training_config.model.name,
                 'trust_remote_code': True,
                 'cache_dir': str(training_config.paths.cache_dir) if training_config.paths.cache_dir else None,
                 'load_in_4bit': training_config.model.load_in_4bit,
-                'use_flash_attention': training_config.model.get('use_flash_attention', True)
+                'use_flash_attention': training_config.model.get_field_value('use_flash_attention', True)
             }
-            logger.info(f"Model loading config: {model_config}")
+            
+            logger.info("=== Model Loading Configuration ===")
+            logger.info(f"Final model config: {model_config}")
+            logger.info(f"Flash attention setting: {model_config['use_flash_attention']}")
             
             result = FastLanguageModel.from_pretrained(**model_config)
             if isinstance(result, tuple):

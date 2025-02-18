@@ -118,7 +118,7 @@ class ModelSettings(BaseModel):
     name: str = Field(
         default="Qwen/Qwen2.5-1.5B-Instruct",
         description="Name or path of the model to use",
-        alias="model_name"  # Allow both name and model_name
+        alias="model_name"
     )
     max_seq_length: int = Field(
         default=384,
@@ -153,6 +153,10 @@ class ModelSettings(BaseModel):
     lora_dropout: float = Field(
         default=0.05,
         description="Dropout probability for LoRA layers"
+    )
+    use_flash_attention: bool = Field(
+        default=True,
+        description="Whether to use flash attention for faster training"
     )
 
     model_config = ConfigDict(
@@ -216,6 +220,22 @@ class ModelSettings(BaseModel):
         for key, value in data.items():
             logger.info(f"  {key}: {value}")
         return data
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        logger.info("=== ModelSettings Initialization ===")
+        logger.info(f"Received fields: {list(data.keys())}")
+        logger.info(f"Initialized fields: {self.model_dump().keys()}")
+    
+    def get_field_value(self, field_name: str, default: Any = None) -> Any:
+        """Safely get field value with logging."""
+        try:
+            value = getattr(self, field_name, default)
+            logger.debug(f"Accessing field '{field_name}': {value} (default: {default})")
+            return value
+        except Exception as e:
+            logger.warning(f"Error accessing field '{field_name}': {str(e)}")
+            return default
 
 class RewardWeights(BaseModel):
     """Reward function weights."""
