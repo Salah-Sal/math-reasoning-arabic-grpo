@@ -58,28 +58,52 @@ def train_model(config_path: Union[str, Path]) -> None:
             logger.info(f"Model settings type: {type(training_config.model)}")
             logger.info(f"Available fields: {training_config.model.model_dump().keys()}")
             
+            # Separate flash attention config
+            use_flash_attention = training_config.model.get_field_value('use_flash_attention', True)
+            logger.info(f"Flash attention setting detected: {use_flash_attention}")
+            
+            # Base model config without flash attention
             model_config = {
                 'model_name': training_config.model.name,
                 'trust_remote_code': True,
                 'cache_dir': str(training_config.paths.cache_dir) if training_config.paths.cache_dir else None,
-                'load_in_4bit': training_config.model.load_in_4bit,
-                'use_flash_attention': training_config.model.get_field_value('use_flash_attention', True)
+                'load_in_4bit': training_config.model.load_in_4bit
             }
             
+            # Add Unsloth-specific configurations
+            unsloth_config = {
+                'max_seq_length': training_config.model.max_seq_length,
+                'gpu_memory_utilization': training_config.model.gpu_memory_utilization
+            }
+            model_config.update(unsloth_config)
+            
             logger.info("=== Model Loading Configuration ===")
-            logger.info(f"Final model config: {model_config}")
-            logger.info(f"Flash attention setting: {model_config['use_flash_attention']}")
+            logger.info(f"Base config: {model_config}")
+            logger.info(f"Flash attention will be configured through Unsloth")
             
-            result = FastLanguageModel.from_pretrained(**model_config)
-            if isinstance(result, tuple):
-                model, tokenizer = result
-            else:
-                model = result
-                tokenizer = None
-            
-            logger.info(f"Base model type: {type(model)}")
-            logger.info(f"Model is quantized: {getattr(model, 'is_quantized', False)}")
-            logger.info(f"Initial trainable params: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
+            try:
+                # Initialize FastLanguageModel with base config
+                result = FastLanguageModel.from_pretrained(**model_config)
+                
+                if isinstance(result, tuple):
+                    model, tokenizer = result
+                else:
+                    model = result
+                    tokenizer = None
+                
+                # Configure flash attention through Unsloth if supported
+                if use_flash_attention and hasattr(model, 'enable_flash_attention'):
+                    logger.info("Enabling flash attention through Unsloth")
+                    model.enable_flash_attention()
+                
+                logger.info(f"Model initialization successful")
+                logger.info(f"Model type: {type(model)}")
+                logger.info(f"Flash attention status: {getattr(model, 'using_flash_attention', False)}")
+                
+            except Exception as e:
+                logger.error(f"Model initialization error: {str(e)}")
+                logger.error("Stack trace:", exc_info=True)
+                raise
             
             # Step 2: Verify PEFT configuration
             logger.info("Step 2: Verifying PEFT configuration")

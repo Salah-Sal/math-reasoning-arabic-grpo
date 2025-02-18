@@ -136,27 +136,19 @@ class ModelSettings(BaseModel):
         default=0.7,
         description="GPU memory utilization target"
     )
-    # Add LoRA configuration fields
-    lora_rank: int = Field(
-        default=16,
-        description="Rank of LoRA matrices"
-    )
-    lora_alpha: int = Field(
-        default=16,
-        description="Alpha parameter for LoRA"
-    )
-    target_modules: List[str] = Field(
-        default=["q_proj", "k_proj", "v_proj", "o_proj", 
-                "gate_proj", "up_proj", "down_proj"],
-        description="Target modules for LoRA"
-    )
-    lora_dropout: float = Field(
-        default=0.05,
-        description="Dropout probability for LoRA layers"
-    )
     use_flash_attention: bool = Field(
         default=True,
-        description="Whether to use flash attention for faster training"
+        description="Whether to enable flash attention (if supported)"
+    )
+    flash_attention_config: Dict[str, Any] = Field(
+        default_factory=lambda: {
+            "enabled": True,
+            "cross_attention": True,
+            "flash_rotary": True,
+            "flash_normalization": True,
+            "device": "cuda"
+        },
+        description="Flash attention configuration parameters"
     )
 
     model_config = ConfigDict(
@@ -225,6 +217,9 @@ class ModelSettings(BaseModel):
         super().__init__(**data)
         logger.info("=== ModelSettings Initialization ===")
         logger.info(f"Received fields: {list(data.keys())}")
+        logger.info(f"Flash attention enabled: {self.use_flash_attention}")
+        if self.use_flash_attention:
+            logger.info(f"Flash attention config: {self.flash_attention_config}")
         logger.info(f"Initialized fields: {self.model_dump().keys()}")
     
     def get_field_value(self, field_name: str, default: Any = None) -> Any:
