@@ -65,13 +65,20 @@ class ModelCheckpointCallback(BaseCallback):
             self.trainer.model.save_pretrained(path)
             logger.info(f"Saved {'best ' if is_best else ''}checkpoint to {path}")
             
-            # Add to tracked checkpoints if not best/final
-            if not is_best and "checkpoint-" in path.name:
-                self._saved_checkpoints.append(path)
-                
-                # Rotate checkpoints if needed
-                if self.max_checkpoints and len(self._saved_checkpoints) > self.max_checkpoints:
-                    self._cleanup_old_checkpoints()
+            # Add to tracked checkpoints
+            if "checkpoint-" in path.name:
+                if is_best:
+                    # For best checkpoint, store with special name
+                    self._saved_checkpoints = [p for p in self._saved_checkpoints 
+                                             if p.name != "checkpoint-best"]
+                    self._saved_checkpoints.append(path)
+                elif not path.name.endswith("final"):
+                    # Regular checkpoint
+                    self._saved_checkpoints.append(path)
+                    
+                    # Rotate checkpoints if needed
+                    if self.max_checkpoints and len(self._saved_checkpoints) > self.max_checkpoints:
+                        self._cleanup_old_checkpoints()
                     
         except Exception as e:
             logger.error(f"Error saving checkpoint to {path}: {str(e)}")
@@ -116,8 +123,8 @@ class ModelCheckpointCallback(BaseCallback):
             checkpoint_path = self.checkpoint_dir / f"checkpoint-{current_step}"
             self._save_checkpoint(checkpoint_path)
         
-        # Check for best model
-        if self.save_best:
+        # Check for best model (only if save_best is True)
+        if self.save_best and self.trainer.state.current_reward > self._best_reward:
             self._check_save_best()
     
     def _on_training_end(self) -> None:
