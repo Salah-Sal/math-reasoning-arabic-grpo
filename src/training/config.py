@@ -136,10 +136,6 @@ class ModelSettings(BaseModel):
         default=0.7,
         description="GPU memory utilization target"
     )
-    use_flash_attention: bool = Field(
-        default=True,
-        description="Whether to enable flash attention (if supported)"
-    )
     flash_attention_config: Dict[str, Any] = Field(
         default_factory=lambda: {
             "enabled": True,
@@ -163,47 +159,66 @@ class ModelSettings(BaseModel):
         """Alias for name to maintain backward compatibility."""
         return self.name
 
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ModelSettings":
-        """Create instance from dictionary with logging."""
-        logger.info("=== Creating ModelSettings from dict ===")
-        logger.info(f"Input data: {data}")
-        logger.info(f"Available fields: {cls.__fields__.keys()}")
+    def get_base_config(self) -> Dict[str, Any]:
+        """Get base model configuration without flash attention settings."""
+        logger.info("Extracting base model configuration")
+        config = {
+            'model_name': self.name,
+            'trust_remote_code': True,
+            'load_in_4bit': self.load_in_4bit,
+            'max_seq_length': self.max_seq_length,
+            'gpu_memory_utilization': self.gpu_memory_utilization
+        }
+        logger.debug(f"Base config: {config}")
+        return config
+
+    def get_flash_attention_config(self) -> Optional[Dict[str, Any]]:
+        """Get flash attention configuration if enabled."""
+        logger.info("Getting flash attention configuration")
+        if not self.flash_attention_config.get('enabled', False):
+            logger.info("Flash attention disabled")
+            return None
         
-        # Handle field name mapping
-        if 'model_name' in data and 'name' not in data:
-            logger.info("Converting 'model_name' to 'name'")
-            data['name'] = data.pop('model_name')
-        
-        # Log field mapping
-        logger.info("=== Field Mapping ===")
-        for key in data:
-            field_info = cls.__fields__.get(key)
-            if field_info:
-                logger.info(f"Field '{key}': alias={field_info.alias}, type={field_info.annotation}")
-            else:
-                logger.warning(f"Extra field '{key}' not in model definition")
-        
-        # Log any extra fields not in model
-        extra_fields = set(data.keys()) - set(cls.__fields__.keys())
-        if extra_fields:
-            logger.warning(f"Extra fields found in data: {extra_fields}")
-        
-        # Log LoRA-specific parameters
-        lora_params = {k: v for k, v in data.items() 
-                      if k in ['lora_rank', 'lora_alpha', 'target_modules', 'lora_dropout']}
-        logger.info(f"LoRA parameters found: {lora_params}")
-        
+        config = {
+            k: v for k, v in self.flash_attention_config.items()
+            if k != 'enabled'
+        }
+        logger.debug(f"Flash attention config: {config}")
+        return config
+
+    def validate_model_compatibility(self) -> None:
+        """Validate model compatibility with current configuration."""
         try:
-            instance = cls(**data)
-            logger.info("=== Created Instance ===")
-            logger.info(f"Fields: {instance.model_dump().keys()}")
-            logger.info(f"Model name via property: {instance.model_name}")
-            logger.info(f"Model name via field: {instance.name}")
-            return instance
+            from transformers import AutoConfig
+            logger.info(f"Validating compatibility for model: {self.name}")
+            
+            config = AutoConfig.from_pretrained(self.name, trust_remote_code=True)
+            logger.info(f"Model config type: {type(config)}")
+            logger.info(f"Available config attributes: {dir(config)}")
+            
+            # Check flash attention support
+            has_flash_support = hasattr(config, 'use_flash_attention')
+            logger.info(f"Flash attention support: {has_flash_support}")
+            
+            if self.flash_attention_config['enabled'] and not has_flash_support:
+                logger.warning(
+                    f"Flash attention enabled but not supported by {self.name}. "
+                    "Will use default attention mechanism."
+                )
+                
         except Exception as e:
-            logger.error(f"Error creating ModelSettings instance: {str(e)}", exc_info=True)
-            raise
+            logger.error(f"Error validating model compatibility: {str(e)}")
+            raise ValueError(f"Model compatibility validation failed: {str(e)}")
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        logger.info("=== ModelSettings Initialization ===")
+        logger.info(f"Received fields: {list(data.keys())}")
+        logger.info(f"Flash attention config: {self.flash_attention_config}")
+        logger.info(f"Initialized fields: {self.model_dump().keys()}")
+        
+        # Validate compatibility
+        self.validate_model_compatibility()
 
     def model_dump(self) -> Dict[str, Any]:
         """Enhanced model dump with logging."""
@@ -213,15 +228,6 @@ class ModelSettings(BaseModel):
             logger.info(f"  {key}: {value}")
         return data
 
-    def __init__(self, **data):
-        super().__init__(**data)
-        logger.info("=== ModelSettings Initialization ===")
-        logger.info(f"Received fields: {list(data.keys())}")
-        logger.info(f"Flash attention enabled: {self.use_flash_attention}")
-        if self.use_flash_attention:
-            logger.info(f"Flash attention config: {self.flash_attention_config}")
-        logger.info(f"Initialized fields: {self.model_dump().keys()}")
-    
     def get_field_value(self, field_name: str, default: Any = None) -> Any:
         """Safely get field value with logging."""
         try:

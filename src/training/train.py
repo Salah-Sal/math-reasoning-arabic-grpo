@@ -83,36 +83,22 @@ def train_model(config_path: Union[str, Path]) -> None:
         # Initialize model with enhanced state verification
         logger.info("=== Model Initialization ===")
         try:
-            # Separate base config from Unsloth-specific settings
-            base_model_config = {
-                'model_name': training_config.model.name,
-                'trust_remote_code': True,
-                'cache_dir': str(training_config.paths.cache_dir) if training_config.paths.cache_dir else None,
-                'load_in_4bit': training_config.model.load_in_4bit,
-                'max_seq_length': training_config.model.max_seq_length,
-                'gpu_memory_utilization': training_config.model.gpu_memory_utilization
-            }
+            # Get base configuration
+            base_model_config = training_config.model.get_base_config()
+            logger.info(f"Base model configuration: {base_model_config}")
             
-            # Unsloth-specific configuration
-            unsloth_config = {}
-            if training_config.model.use_flash_attention:
-                unsloth_config['flash_attention'] = True
-                unsloth_config['flash_attn_cross_attention'] = True
-                unsloth_config['flash_attn_rotary'] = True
-                unsloth_config['flash_attn_norm'] = True
-                logger.info("Flash attention enabled in Unsloth config")
+            # Get flash attention configuration
+            flash_config = training_config.model.get_flash_attention_config()
+            if flash_config:
+                logger.info(f"Flash attention configuration: {flash_config}")
+            else:
+                logger.info("Flash attention disabled or not supported")
             
-            # Log configuration separation
-            logger.info("=== Configuration Separation ===")
-            logger.info(f"Base model config: {base_model_config}")
-            logger.info(f"Unsloth-specific config: {unsloth_config}")
-            
+            # Initialize model with base config first
+            logger.info("Loading base model...")
             try:
-                # Load base model with separated configs
-                logger.info("Loading base model...")
                 result = FastLanguageModel.from_pretrained(
-                    **base_model_config,
-                    **unsloth_config
+                    **base_model_config
                 )
                 
                 if isinstance(result, tuple):
@@ -123,42 +109,44 @@ def train_model(config_path: Union[str, Path]) -> None:
                     tokenizer = None
                     logger.info("Model loaded successfully (no tokenizer)")
                 
-                # Verify model state and optimizations
+                # Verify model state
                 logger.info("=== Model State Verification ===")
                 logger.info(f"Model type: {type(model)}")
                 logger.info(f"Model base class: {model.__class__.__bases__}")
-                logger.info(f"Model config: {model.config if hasattr(model, 'config') else 'No config found'}")
-                logger.info(f"Flash attention status: {getattr(model.config, 'use_flash_attention', 'Not found')}")
+                logger.info(f"Model config type: {type(model.config)}")
+                logger.info(f"Available config attributes: {dir(model.config)}")
                 
-                # Verify Unsloth optimizations
-                logger.info("=== Optimization Verification ===")
-                logger.info(f"Available optimizations: {[attr for attr in dir(model) if 'flash' in attr.lower()]}")
-                logger.info(f"Memory efficient attention: {getattr(model.config, 'use_memory_efficient_attention', False)}")
+                # Apply flash attention if supported
+                if flash_config:
+                    logger.info("Attempting to apply flash attention configuration...")
+                    if hasattr(model.config, 'set_flash_attention'):
+                        model.config.set_flash_attention(**flash_config)
+                        logger.info("Flash attention configuration applied successfully")
+                    else:
+                        logger.warning("Model does not support flash attention configuration")
                 
-                # Prepare model for GRPO
-                logger.info("=== GRPO Preparation ===")
-                try:
-                    # First verify model is on correct device
-                    if torch.cuda.is_available():
-                        model = model.cuda()
-                        logger.info("Model moved to CUDA")
+                # Move model to device
+                if torch.cuda.is_available():
+                    model = model.cuda()
+                    logger.info("Model moved to CUDA")
                     
-                    # Apply GRPO patch with state verification
-                    logger.info("Attempting GRPO patching...")
+                # Apply GRPO patch
+                logger.info("=== GRPO Patch Application ===")
+                try:
                     PatchFastRL("GRPO", FastLanguageModel)
-                    logger.info("Global patch applied")
+                    logger.info("GRPO patch applied successfully")
                     
                     # Verify patched state
                     logger.info("=== Post-Patch Verification ===")
-                    logger.info(f"GRPO methods: {[m for m in dir(model) if 'grpo' in m.lower()]}")
-                    logger.info(f"Training methods: {[m for m in dir(model) if 'train' in m.lower()]}")
-                    
-                    return model, tokenizer
+                    logger.info(f"GRPO methods available: {[m for m in dir(model) if 'grpo' in m.lower()]}")
+                    logger.info(f"Training methods available: {[m for m in dir(model) if 'train' in m.lower()]}")
                     
                 except Exception as e:
                     logger.error(f"GRPO patching failed: {str(e)}")
                     logger.error("Stack trace:", exc_info=True)
                     raise
+                
+                return model, tokenizer
                 
             except Exception as e:
                 logger.error(f"Model loading failed: {str(e)}")
