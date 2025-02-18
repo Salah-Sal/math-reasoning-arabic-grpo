@@ -143,7 +143,7 @@ class PathSettings(BaseModel):
     )
     checkpoint_dir: Path = Field(
         default=Path("checkpoints"),
-        description="Directory for model checkpoints"
+        description="Directory for logs"
     )
     log_dir: Path = Field(
         default=Path("logs"),
@@ -163,6 +163,28 @@ class PathSettings(BaseModel):
             v.mkdir(parents=True, exist_ok=True)
         return v
 
+class EarlyStoppingSettings(BaseModel):
+    """Early stopping configuration."""
+    enabled: bool = Field(
+        default=True,
+        description="Whether to enable early stopping"
+    )
+    patience: int = Field(
+        default=5,
+        ge=0,
+        description="Number of steps to wait for improvement before stopping"
+    )
+    min_improvement: float = Field(
+        default=0.01,
+        gt=0.0,
+        description="Minimum improvement in reward to reset patience"
+    )
+    min_steps: int = Field(
+        default=100,
+        ge=0,
+        description="Minimum number of steps before allowing early stopping"
+    )
+
 class GRPOConfig(BaseModel):
     """Main GRPO training configuration."""
     training: TrainingSettings = Field(
@@ -180,6 +202,10 @@ class GRPOConfig(BaseModel):
     paths: PathSettings = Field(
         default_factory=PathSettings,
         description="Path settings"
+    )
+    early_stopping: EarlyStoppingSettings = Field(
+        default_factory=EarlyStoppingSettings,
+        description="Early stopping settings"
     )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)

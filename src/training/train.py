@@ -6,96 +6,88 @@ from src.training.monitoring import TrainingMonitor
 from src.data.dataset import ArabicMathDataset
 from src.infrastructure.config import GRPOConfig as ProjectConfig
 from src.infrastructure.logging import get_logger
+from src.training.callbacks.checkpoint import ModelCheckpointCallback
+from src.training.callbacks.early_stopping import EarlyStoppingCallback
+from typing import Union
 
 logger = get_logger(__name__)
 
-def train_model(config_path: Path):
-    """Main training function with comprehensive monitoring."""
+def train_model(config_path: Union[str, Path]) -> None:
+    """Train the model using the specified configuration.
     
-    # Initialize monitoring
-    monitor = TrainingMonitor(Path("logs/training"))
-    monitor.log_system_info()
-    
+    Args:
+        config_path: Path to the configuration file
+    """
     try:
+        # Initialize monitoring
+        monitor = TrainingMonitor(log_dir=Path("logs/training"))
+        monitor.log_system_info()
+        
         # Load configuration
-        config = ProjectConfig.from_yaml(config_path)
+        config = GRPOConfig.from_yaml(config_path)
         logger.info(f"Loaded configuration from {config_path}")
         
-        # Initialize model with monitoring
-        logger.info("Initializing model...")
-        model, tokenizer = FastLanguageModel.from_pretrained(
-            model_name=config.model.model_name,
-            max_seq_length=config.model.max_seq_length,
-            load_in_4bit=config.model.load_in_4bit,
-            fast_inference=config.model.fast_inference,
-            gpu_memory_utilization=config.memory.gpu_memory_utilization
+        # Initialize model and PEFT
+        model = FastLanguageModel.from_pretrained(
+            model_name=config.training.model_name,
+            trust_remote_code=True,
+            cache_dir=config.paths.cache_dir
         )
+        model = PatchFastRL(model)
+        
         monitor.log_model_info(model)
         
-        # Setup PEFT
-        logger.info("Setting up PEFT...")
-        model = FastLanguageModel.get_peft_model(
-            model,
-            r=config.model.max_lora_rank,
-            target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
-            lora_alpha=config.model.max_lora_rank,
-            use_gradient_checkpointing=config.memory.use_gradient_checkpointing,
-            random_state=config.seed
-        )
-        monitor.log_model_info(model)  # Log after PEFT setup
-        
-        # Load dataset with monitoring
-        logger.info("Loading dataset...")
+        # Load dataset
         dataset = ArabicMathDataset(
-            data_dir=config.data.data_dir,
-            system_prompt=config.training.system_prompt
-        ).to_huggingface_dataset()
+            data_path=config.paths.data_path,
+            cache_dir=config.paths.cache_dir
+        )
         monitor.log_dataset_info(dataset)
         
-        # Sample batch for monitoring
-        if len(dataset) > 0:
-            sample_batch = {k: dataset[0][k] for k in dataset[0].keys()}
-            monitor.log_batch_processing(sample_batch)
-            monitor.log_arabic_processing(
-                str(sample_batch['prompt']),
-                tokenizer
+        # Sample a batch for monitoring
+        batch = dataset.sample_batch(config.training.batch_size)
+        monitor.log_batch_processing(batch)
+        
+        # Initialize callbacks
+        callbacks = [
+            monitor,
+            ModelCheckpointCallback(
+                checkpoint_dir=config.paths.checkpoint_dir,
+                save_steps=config.training.save_steps,
+                max_checkpoints=config.memory.max_checkpoints,
+                save_best=True,
+                save_final=True
+            )
+        ]
+        
+        # Add early stopping if enabled
+        if config.early_stopping.enabled:
+            callbacks.append(
+                EarlyStoppingCallback(
+                    patience=config.early_stopping.patience,
+                    min_improvement=config.early_stopping.min_improvement,
+                    min_steps=config.early_stopping.min_steps
+                )
             )
         
         # Initialize trainer
-        training_args = GRPOConfig(
-            learning_rate=config.training.learning_rate,
-            max_steps=config.training.max_steps,
-            per_device_train_batch_size=config.training.per_device_train_batch_size,
-            gradient_accumulation_steps=config.training.gradient_accumulation_steps,
-            max_prompt_length=config.training.max_prompt_length,
-            max_completion_length=config.training.max_completion_length,
-            logging_steps=config.training.logging_steps,
-            output_dir=str(config.paths.output_dir),
-            report_to="none"
-        )
-        
         trainer = GRPOTrainer(
             model=model,
-            processing_class=tokenizer,
-            args=training_args,
-            train_dataset=dataset,
-            callbacks=[monitor]  # Add monitoring callback
+            dataset=dataset,
+            config=config,
+            callbacks=callbacks
         )
         
-        # Train with monitoring
-        logger.info("Starting training...")
+        # Start training
         trainer.train()
-        
-        logger.info("Training completed successfully!")
         
     except Exception as e:
         logger.error(f"Training failed: {str(e)}", exc_info=True)
+        monitor.log_final_memory_stats()
         raise
-    finally:
-        # Log final memory stats
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            monitor.log_model_info(model)
+    else:
+        logger.info("Training completed successfully")
+        monitor.log_final_memory_stats()
 
 if __name__ == "__main__":
     import sys

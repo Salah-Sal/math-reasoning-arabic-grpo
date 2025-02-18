@@ -26,6 +26,12 @@ reward:
   cache_size: 1000
   normalize_rewards: true
 
+early_stopping:
+  enabled: true
+  patience: 5
+  min_improvement: 0.01
+  min_steps: 100
+
 paths:
   output_dir: "outputs/grpo_training"
   checkpoint_dir: "checkpoints"
