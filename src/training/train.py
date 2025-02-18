@@ -49,145 +49,100 @@ def train_model(config_path: Union[str, Path]) -> None:
         logger.info(f"Cache dir resolved to: {training_config.paths.cache_dir.resolve() if training_config.paths.cache_dir else 'None'}")
         logger.info("=====================")
         
-        # Initialize model and PEFT with config verification
-        logger.info("=== Model Configuration ===")
-        model_config = {
-            'model_name': training_config.model.model_name if hasattr(training_config, 'model') else 'Not found in config',
-            'trust_remote_code': True,
-            'cache_dir': str(training_config.paths.cache_dir) if training_config.paths.cache_dir else None
-        }
-        logger.info(f"Attempting to initialize model with config: {model_config}")
-        
-        # Verify reward configuration
-        logger.info("=== Reward Configuration Verification ===")
-        logger.info(f"Reward config present: {hasattr(training_config, 'reward')}")
-        if hasattr(training_config, 'reward'):
-            logger.info(f"Reward settings: {training_config.reward.model_dump()}")
-            logger.info(f"Reward weights: {training_config.reward.weights.model_dump()}")
-        
-        # Initialize reward handler
-        from src.training.reward_handler import RewardHandler
-        logger.info("Initializing RewardHandler...")
-        reward_handler = RewardHandler(training_config.reward.model_dump())
-        logger.info(f"RewardHandler initialized with config: {reward_handler.config}")
-        
-        # Verify Unsloth and model initialization
-        logger.info("=== Model Initialization Verification ===")
-        logger.info(f"FastLanguageModel attributes: {dir(FastLanguageModel)}")
-        logger.info(f"PatchFastRL attributes: {dir(PatchFastRL)}")
-        
-        # Remove global patch
-        logger.info("Step 0: Checking if global patch was applied")
-        logger.info(f"FastLanguageModel patched status: {getattr(FastLanguageModel, '_is_patched', False)}")
-        
-        # First load model configuration
-        logger.info("Step 1: Loading model configuration")
-        from transformers import AutoConfig
-        model_cfg = AutoConfig.from_pretrained(
-            model_config['model_name'],
-            trust_remote_code=True,
-            cache_dir=model_config.get('cache_dir')
-        )
-        logger.info(f"Loaded model config type: {type(model_cfg)}")
-        logger.info(f"Model config attributes: {dir(model_cfg)}")
-        
-        # Track variables for debugging
-        model = None
-        tokenizer = None
-        
-        logger.info("Step 2: Initializing FastLanguageModel")
+        # Initialize model and PEFT with enhanced logging and verification
+        logger.info("=== Model and PEFT Initialization ===")
         try:
-            # Log configuration types for verification
-            logger.info("=== Configuration Type Verification ===")
-            logger.info(f"Training config type: {type(training_config)}")
-            logger.info(f"Model config type: {type(model_cfg)}")
+            # Step 1: Load base model with quantization
+            logger.info("Step 1: Loading quantized base model")
+            model_config = {
+                'model_name': training_config.model.model_name if hasattr(training_config, 'model') else 'Not found in config',
+                'trust_remote_code': True,
+                'cache_dir': str(training_config.paths.cache_dir) if training_config.paths.cache_dir else None,
+                'load_in_4bit': training_config.model.load_in_4bit,
+                'use_flash_attention': training_config.model.get('use_flash_attention', True)
+            }
+            logger.info(f"Model loading config: {model_config}")
             
             result = FastLanguageModel.from_pretrained(**model_config)
-            logger.info(f"FastLanguageModel.from_pretrained return type: {type(result)}")
-            
-            # Handle tuple return
             if isinstance(result, tuple):
-                logger.info(f"Unpacking tuple of length {len(result)}")
                 model, tokenizer = result
-                logger.info(f"Unpacked model type: {type(model)}")
-                logger.info(f"Unpacked tokenizer type: {type(tokenizer)}")
             else:
-                logger.info("Result is not a tuple, using as is")
                 model = result
+                tokenizer = None
             
-            # Set model configuration
-            if not hasattr(model, 'config'):
-                logger.info("Setting model configuration")
-                model.config = model_cfg
-                logger.info(f"Model config set successfully: {hasattr(model, 'config')}")
+            logger.info(f"Base model type: {type(model)}")
+            logger.info(f"Model is quantized: {getattr(model, 'is_quantized', False)}")
+            logger.info(f"Initial trainable params: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
             
-            # Store original model for backup
-            original_model = model
-            logger.info("Stored original model for backup")
+            # Step 2: Verify PEFT configuration
+            logger.info("Step 2: Verifying PEFT configuration")
+            peft_config = {
+                'r': training_config.model.lora_rank,
+                'target_modules': training_config.model.target_modules,
+                'lora_alpha': training_config.model.lora_alpha,
+                'lora_dropout': training_config.model.lora_dropout,
+                'use_gradient_checkpointing': training_config.memory.use_gradient_checkpointing
+            }
+            logger.info(f"PEFT configuration: {peft_config}")
             
-            # Verify configurations are distinct
-            logger.info("=== Configuration Verification ===")
-            logger.info(f"Training config paths present: {hasattr(training_config, 'paths')}")
-            logger.info(f"Model config type: {type(getattr(model, 'config', None))}")
+            # Step 3: Apply PEFT before GRPO patch
+            logger.info("Step 3: Applying PEFT configuration")
+            try:
+                model = FastLanguageModel.get_peft_model(
+                    model,
+                    **peft_config
+                )
+                logger.info("PEFT model created successfully")
+            except Exception as e:
+                logger.error(f"Error applying PEFT: {str(e)}")
+                raise ValueError(f"PEFT setup failed: {str(e)}")
             
+            # Step 4: Verify PEFT setup
+            logger.info("Step 4: Verifying PEFT setup")
+            logger.info(f"Model has PEFT config: {hasattr(model, 'peft_config')}")
+            logger.info(f"Trainable parameters after PEFT: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
+            
+            # Step 5: Apply GRPO patch
+            logger.info("Step 5: Applying GRPO patch")
+            model = PatchFastRL(model)
             if model is None:
-                raise ValueError("Model initialization failed - model is None")
-            if tokenizer is None:
-                raise ValueError("Model initialization failed - tokenizer is None")
+                raise ValueError("GRPO patching failed - model is None")
+            
+            logger.info(f"Final model type: {type(model)}")
+            logger.info(f"PEFT config still present: {hasattr(model, 'peft_config')}")
+            
+            # Step 6: Final verification
+            logger.info("Step 6: Final model verification")
+            trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+            total_params = sum(p.numel() for p in model.parameters())
+            logger.info(f"Final trainable parameters: {trainable_params:,}")
+            logger.info(f"Total parameters: {total_params:,}")
+            logger.info(f"Percentage trainable: {(trainable_params/total_params)*100:.2f}%")
+            
+            if trainable_params == 0:
+                raise ValueError("No trainable parameters found after setup")
+            
+            return model, tokenizer
             
         except Exception as e:
-            logger.error(f"Error during model initialization: {str(e)}")
+            logger.error(f"Model initialization failed: {str(e)}", exc_info=True)
             raise
+
+        # Initialize trainer with verified model
+        logger.info("=== Trainer Initialization ===")
+        training_args = TRLConfig(
+            learning_rate=training_config.training.learning_rate,
+            max_steps=training_config.training.max_steps,
+            per_device_train_batch_size=training_config.training.per_device_train_batch_size,
+            gradient_accumulation_steps=training_config.training.gradient_accumulation_steps,
+            max_prompt_length=training_config.training.max_prompt_length,
+            max_completion_length=training_config.training.max_completion_length,
+            logging_steps=training_config.training.logging_steps,
+            output_dir=str(training_config.paths.output_dir),
+            report_to=training_config.training.report_to
+        )
         
-        logger.info(f"Model type after initialization: {type(model)}")
-        logger.info(f"Model attributes: {dir(model)}")
-        
-        # Store original model for backup
-        original_model = model
-        logger.info("Stored original model for backup")
-        
-        logger.info("Step 3: Applying PatchFastRL")
-        try:
-            patched_model = PatchFastRL(model)
-            logger.info(f"PatchFastRL return type: {type(patched_model)}")
-            
-            # Handle different return types from PatchFastRL
-            if patched_model is None:
-                logger.warning("PatchFastRL returned None, using original model")
-                model = original_model
-            elif callable(patched_model):
-                logger.info("PatchFastRL returned a function, applying it to model")
-                model = patched_model(model)
-            else:
-                logger.info("PatchFastRL returned a model directly")
-                model = patched_model
-            
-            logger.info(f"Model type after patching: {type(model)}")
-            
-            if model is None:
-                raise ValueError("Patching failed - model is None")
-            
-        except Exception as e:
-            logger.error(f"Error during model patching: {str(e)}")
-            logger.info("Falling back to original model")
-            model = original_model
-        
-        logger.info(f"Final model type: {type(model)}")
-        logger.info(f"Final model attributes: {dir(model)}")
-        
-        # Verify model and tokenizer before attachment
-        logger.info("=== Final State Verification ===")
-        logger.info(f"Model is None: {model is None}")
-        logger.info(f"Tokenizer is None: {tokenizer is None}")
-        
-        if model is not None and tokenizer is not None:
-            # Store tokenizer for later use
-            model.tokenizer = tokenizer
-            logger.info("Tokenizer attached to model successfully")
-        else:
-            raise ValueError("Cannot attach tokenizer - model or tokenizer is None")
-        
-        monitor.log_model_info(model)
+        logger.info(f"Training arguments: {training_args}")
         
         # Load dataset with detailed logging
         logger.info(f"Loading dataset from {training_config.paths.data_path}")
@@ -240,22 +195,6 @@ def train_model(config_path: Union[str, Path]) -> None:
         
         logger.info(f"Initialized {len(callbacks)} callbacks")
         logger.info("=============================")
-        
-        # Initialize trainer with reward functions
-        training_args = TRLConfig(
-            learning_rate=training_config.training.learning_rate,
-            max_steps=training_config.training.max_steps,
-            per_device_train_batch_size=training_config.training.per_device_train_batch_size,
-            gradient_accumulation_steps=training_config.training.gradient_accumulation_steps,
-            max_prompt_length=training_config.training.max_prompt_length,
-            max_completion_length=training_config.training.max_completion_length,
-            logging_steps=training_config.training.logging_steps,
-            output_dir=str(training_config.paths.output_dir),
-            report_to=training_config.training.report_to
-        )
-        
-        logger.info("=== Trainer Initialization ===")
-        logger.info(f"Training arguments: {training_args}")
         
         # Create reward function wrapper for GRPO
         def reward_function(prompts, completions, **kwargs):

@@ -4,7 +4,8 @@ model:
   load_in_4bit: true
   fast_inference: false
   gpu_memory_utilization: 0.7
-  # Add LoRA configuration
+  use_flash_attention: true
+  # PEFT configuration
   lora_rank: 16
   lora_alpha: 16
   target_modules:
@@ -32,10 +33,10 @@ training:
 
 memory:
   gpu_memory_utilization: 0.7
-  use_gradient_checkpointing: true
+  use_gradient_checkpointing: "unsloth"  # Changed to match Unsloth's expectations
   optimize_memory_use: true
   max_memory_MB: 8000
-  dtype: "float16"  # or "bfloat16" if supported
+  dtype: "float16"
 
 reward:
   weights:
