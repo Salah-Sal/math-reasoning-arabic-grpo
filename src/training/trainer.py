@@ -5,7 +5,6 @@ from unsloth import FastLanguageModel
 from src.infrastructure.config import ProjectConfig
 from src.infrastructure.logging import get_logger
 from src.data.dataset import ArabicMathDataset
-from src.utils.memory import clear_memory
 
 logger = get_logger(__name__)
 
@@ -16,8 +15,9 @@ class Trainer:
         """Create a new config with adjusted settings for GPU constraints"""
         config_dict = config.model_dump()
         if torch.cuda.get_device_properties(0).total_memory < 10 * 1024**3:
+            # For 8GB GPUs, use conservative settings that work well with vLLM
             config_dict['model']['max_seq_length'] = 256
-            config_dict['model']['gpu_memory_utilization'] = 0.85
+            config_dict['model']['gpu_memory_utilization'] = 0.6  # Let vLLM manage memory
             config_dict['training']['per_device_train_batch_size'] = 1
             config_dict['training']['gradient_accumulation_steps'] = 1
             config_dict['training']['num_generations'] = 4
@@ -37,7 +37,6 @@ class Trainer:
             poc_mode: Whether to run in proof-of-concept mode
             output_dir: Directory for saving outputs
         """
-        # Create adjusted config instead of modifying existing one
         self.config = self._adjust_config_for_gpu(config)
         self._validate_config(self.config)
         
@@ -62,13 +61,13 @@ class Trainer:
     def _initialize_model(self):
         """Initialize the model and tokenizer."""
         try:
-            logger.info("Starting model initialization")
+            logger.info("Starting model initialization...")
+            logger.info(f"Model name: {self.config.model.model_name}")
+            logger.info(f"Model config: max_seq_length={self.config.model.max_seq_length}, "
+                        f"load_in_4bit={self.config.model.load_in_4bit}, "
+                        f"gpu_memory_utilization={self.config.model.gpu_memory_utilization}")
             
-            # Log pre-initialization state
-            if torch.cuda.is_available():
-                logger.info(f"Initial GPU memory allocated: {torch.cuda.memory_allocated() / 1024**3:.2f}GB")
-            
-            # Load base model
+            # Let vLLM handle memory management
             self.model, self.tokenizer = FastLanguageModel.from_pretrained(
                 model_name=self.config.model.model_name,
                 max_seq_length=self.config.model.max_seq_length,
@@ -78,25 +77,9 @@ class Trainer:
                 gpu_memory_utilization=self.config.model.gpu_memory_utilization
             )
             
-            # Log post-base model state
-            logger.info(f"Base model type: {type(self.model)}")
-            logger.info(f"Has fast_inference: {hasattr(self.model, 'fast_inference')}")
-            logger.info(f"GPU memory after base model: {torch.cuda.memory_allocated() / 1024**3:.2f}GB")
-            
-            # Configure PEFT
-            self.model = FastLanguageModel.get_peft_model(
-                self.model,
-                r=self.config.model.max_lora_rank,
-                target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
-                lora_alpha=16,
-                use_gradient_checkpointing="unsloth",
-                random_state=3407,
-            )
-            
-            # Log final state
-            logger.info(f"Final model type: {type(self.model)}")
-            logger.info(f"Has fast_inference after PEFT: {hasattr(self.model, 'fast_inference')}")
-            logger.info(f"Final GPU memory: {torch.cuda.memory_allocated() / 1024**3:.2f}GB")
+            logger.info(f"Model type: {type(self.model)}")
+            logger.info(f"Model config type: {type(self.model.config)}")
+            logger.info("Model initialization completed successfully")
             
         except Exception as e:
             logger.error(f"Failed to initialize model: {str(e)}")
