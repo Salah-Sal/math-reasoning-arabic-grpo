@@ -28,14 +28,14 @@ def train_model(config_path: Union[str, Path]) -> None:
         
         # Load configuration with detailed logging
         logger.info(f"Loading configuration from {config_path}")
-        config = GRPOConfig.from_yaml(config_path)
+        training_config = GRPOConfig.from_yaml(config_path)
         
         # Log full configuration structure
         logger.info("=== Configuration Structure ===")
-        logger.info(f"Available top-level keys: {config.model_dump().keys()}")
-        logger.info(f"Training settings: {config.training.model_dump()}")
-        logger.info(f"Memory settings: {config.memory.model_dump()}")
-        logger.info(f"Path settings: {config.paths.model_dump()}")
+        logger.info(f"Available top-level keys: {training_config.model_dump().keys()}")
+        logger.info(f"Training settings: {training_config.training.model_dump()}")
+        logger.info(f"Memory settings: {training_config.memory.model_dump()}")
+        logger.info(f"Path settings: {training_config.paths.model_dump()}")
         logger.info("=============================")
         
         # Log monitor methods
@@ -46,29 +46,29 @@ def train_model(config_path: Union[str, Path]) -> None:
         # Verify path resolution
         logger.info("=== Path Resolution ===")
         logger.info(f"Config path resolved to: {Path(config_path).resolve()}")
-        logger.info(f"Cache dir resolved to: {config.paths.cache_dir.resolve() if config.paths.cache_dir else 'None'}")
+        logger.info(f"Cache dir resolved to: {training_config.paths.cache_dir.resolve() if training_config.paths.cache_dir else 'None'}")
         logger.info("=====================")
         
         # Initialize model and PEFT with config verification
         logger.info("=== Model Configuration ===")
         model_config = {
-            'model_name': config.model.model_name if hasattr(config, 'model') else 'Not found in config',
+            'model_name': training_config.model.model_name if hasattr(training_config, 'model') else 'Not found in config',
             'trust_remote_code': True,
-            'cache_dir': str(config.paths.cache_dir) if config.paths.cache_dir else None
+            'cache_dir': str(training_config.paths.cache_dir) if training_config.paths.cache_dir else None
         }
         logger.info(f"Attempting to initialize model with config: {model_config}")
         
         # Verify reward configuration
         logger.info("=== Reward Configuration Verification ===")
-        logger.info(f"Reward config present: {hasattr(config, 'reward')}")
-        if hasattr(config, 'reward'):
-            logger.info(f"Reward settings: {config.reward.model_dump()}")
-            logger.info(f"Reward weights: {config.reward.weights.model_dump()}")
+        logger.info(f"Reward config present: {hasattr(training_config, 'reward')}")
+        if hasattr(training_config, 'reward'):
+            logger.info(f"Reward settings: {training_config.reward.model_dump()}")
+            logger.info(f"Reward weights: {training_config.reward.weights.model_dump()}")
         
         # Initialize reward handler
         from src.training.reward_handler import RewardHandler
         logger.info("Initializing RewardHandler...")
-        reward_handler = RewardHandler(config.reward.model_dump())
+        reward_handler = RewardHandler(training_config.reward.model_dump())
         logger.info(f"RewardHandler initialized with config: {reward_handler.config}")
         
         # Verify Unsloth and model initialization
@@ -80,16 +80,16 @@ def train_model(config_path: Union[str, Path]) -> None:
         logger.info("Step 0: Checking if global patch was applied")
         logger.info(f"FastLanguageModel patched status: {getattr(FastLanguageModel, '_is_patched', False)}")
         
-        # First load configuration
+        # First load model configuration
         logger.info("Step 1: Loading model configuration")
         from transformers import AutoConfig
-        config = AutoConfig.from_pretrained(
+        model_cfg = AutoConfig.from_pretrained(
             model_config['model_name'],
             trust_remote_code=True,
             cache_dir=model_config.get('cache_dir')
         )
-        logger.info(f"Loaded config type: {type(config)}")
-        logger.info(f"Config attributes: {dir(config)}")
+        logger.info(f"Loaded model config type: {type(model_cfg)}")
+        logger.info(f"Model config attributes: {dir(model_cfg)}")
         
         # Track variables for debugging
         model = None
@@ -97,6 +97,11 @@ def train_model(config_path: Union[str, Path]) -> None:
         
         logger.info("Step 2: Initializing FastLanguageModel")
         try:
+            # Log configuration types for verification
+            logger.info("=== Configuration Type Verification ===")
+            logger.info(f"Training config type: {type(training_config)}")
+            logger.info(f"Model config type: {type(model_cfg)}")
+            
             result = FastLanguageModel.from_pretrained(**model_config)
             logger.info(f"FastLanguageModel.from_pretrained return type: {type(result)}")
             
@@ -110,10 +115,20 @@ def train_model(config_path: Union[str, Path]) -> None:
                 logger.info("Result is not a tuple, using as is")
                 model = result
             
-            # Verify unpacking
-            logger.info("=== Variable State After Unpacking ===")
-            logger.info(f"Model variable type: {type(model)}")
-            logger.info(f"Tokenizer variable type: {type(tokenizer)}")
+            # Set model configuration
+            if not hasattr(model, 'config'):
+                logger.info("Setting model configuration")
+                model.config = model_cfg
+                logger.info(f"Model config set successfully: {hasattr(model, 'config')}")
+            
+            # Store original model for backup
+            original_model = model
+            logger.info("Stored original model for backup")
+            
+            # Verify configurations are distinct
+            logger.info("=== Configuration Verification ===")
+            logger.info(f"Training config paths present: {hasattr(training_config, 'paths')}")
+            logger.info(f"Model config type: {type(getattr(model, 'config', None))}")
             
             if model is None:
                 raise ValueError("Model initialization failed - model is None")
@@ -126,12 +141,6 @@ def train_model(config_path: Union[str, Path]) -> None:
         
         logger.info(f"Model type after initialization: {type(model)}")
         logger.info(f"Model attributes: {dir(model)}")
-        
-        # Set configuration if needed
-        if not hasattr(model, 'config'):
-            logger.info("Setting model configuration")
-            model.config = config
-            logger.info(f"Config set successfully: {hasattr(model, 'config')}")
         
         # Store original model for backup
         original_model = model
@@ -181,17 +190,17 @@ def train_model(config_path: Union[str, Path]) -> None:
         monitor.log_model_info(model)
         
         # Load dataset with detailed logging
-        logger.info(f"Loading dataset from {config.paths.data_path}")
+        logger.info(f"Loading dataset from {training_config.paths.data_path}")
         dataset = ArabicMathDataset(
-            data_dir=config.paths.data_path,
-            cache_dir=config.paths.cache_dir
+            data_dir=training_config.paths.data_path,
+            cache_dir=training_config.paths.cache_dir
         )
         monitor.log_dataset_info(dataset)
         
         # Sample a batch for monitoring with enhanced error handling
         logger.info("Sampling batch for monitoring")
         try:
-            batch = dataset.sample_batch(config.training.per_device_train_batch_size)
+            batch = dataset.sample_batch(training_config.training.per_device_train_batch_size)
             if not batch.get('examples'):
                 logger.warning("No examples in sampled batch")
             else:
@@ -206,9 +215,9 @@ def train_model(config_path: Union[str, Path]) -> None:
         
         # Prepare checkpoint callback with proper config access
         checkpoint_config = {
-            'checkpoint_dir': config.paths.checkpoint_dir,
-            'save_steps': config.training.save_steps,
-            'max_checkpoints': config.training.max_checkpoints,  # Changed from memory to training
+            'checkpoint_dir': training_config.paths.checkpoint_dir,
+            'save_steps': training_config.training.save_steps,
+            'max_checkpoints': training_config.training.max_checkpoints,  # Changed from memory to training
             'save_best': True,
             'save_final': True
         }
@@ -220,11 +229,11 @@ def train_model(config_path: Union[str, Path]) -> None:
         ]
         
         # Add early stopping if enabled
-        if config.early_stopping.enabled:
+        if training_config.early_stopping.enabled:
             early_stopping_config = {
-                'patience': config.early_stopping.patience,
-                'min_improvement': config.early_stopping.min_improvement,
-                'min_steps': config.early_stopping.min_steps
+                'patience': training_config.early_stopping.patience,
+                'min_improvement': training_config.early_stopping.min_improvement,
+                'min_steps': training_config.early_stopping.min_steps
             }
             logger.info(f"Early stopping configuration: {early_stopping_config}")
             callbacks.append(EarlyStoppingCallback(**early_stopping_config))
@@ -234,15 +243,15 @@ def train_model(config_path: Union[str, Path]) -> None:
         
         # Initialize trainer with reward functions
         training_args = TRLConfig(
-            learning_rate=config.training.learning_rate,
-            max_steps=config.training.max_steps,
-            per_device_train_batch_size=config.training.per_device_train_batch_size,
-            gradient_accumulation_steps=config.training.gradient_accumulation_steps,
-            max_prompt_length=config.training.max_prompt_length,
-            max_completion_length=config.training.max_completion_length,
-            logging_steps=config.training.logging_steps,
-            output_dir=str(config.paths.output_dir),
-            report_to=config.training.report_to
+            learning_rate=training_config.training.learning_rate,
+            max_steps=training_config.training.max_steps,
+            per_device_train_batch_size=training_config.training.per_device_train_batch_size,
+            gradient_accumulation_steps=training_config.training.gradient_accumulation_steps,
+            max_prompt_length=training_config.training.max_prompt_length,
+            max_completion_length=training_config.training.max_completion_length,
+            logging_steps=training_config.training.logging_steps,
+            output_dir=str(training_config.paths.output_dir),
+            report_to=training_config.training.report_to
         )
         
         logger.info("=== Trainer Initialization ===")
