@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Optional, Dict, Any, Literal
+from typing import Optional, Dict, Any, Literal, List
 from pydantic import BaseModel, Field, validator, ConfigDict
 import yaml
 from src.infrastructure.logging import get_logger
@@ -104,22 +104,70 @@ class MemorySettings(BaseModel):
 
 class ModelSettings(BaseModel):
     """Model configuration settings."""
-    model_name: str = Field(
+    name: str = Field(
         default="Qwen/Qwen2.5-1.5B-Instruct",
         description="Name or path of the model to use"
     )
-    trust_remote_code: bool = Field(
-        default=True,
-        description="Whether to trust remote code when loading model"
+    max_seq_length: int = Field(
+        default=384,
+        description="Maximum sequence length"
     )
     load_in_4bit: bool = Field(
         default=True,
         description="Whether to load model in 4-bit quantization"
     )
-    use_flash_attention: bool = Field(
-        default=True,
-        description="Whether to use flash attention"
+    fast_inference: bool = Field(
+        default=False,
+        description="Whether to use fast inference"
     )
+    gpu_memory_utilization: float = Field(
+        default=0.7,
+        description="GPU memory utilization target"
+    )
+    # Add LoRA configuration fields
+    lora_rank: int = Field(
+        default=16,
+        description="Rank of LoRA matrices"
+    )
+    lora_alpha: int = Field(
+        default=16,
+        description="Alpha parameter for LoRA"
+    )
+    target_modules: List[str] = Field(
+        default=["q_proj", "k_proj", "v_proj", "o_proj", 
+                "gate_proj", "up_proj", "down_proj"],
+        description="Target modules for LoRA"
+    )
+    lora_dropout: float = Field(
+        default=0.05,
+        description="Dropout probability for LoRA layers"
+    )
+
+    model_config = ConfigDict(
+        extra='allow',  # Allow extra fields
+        validate_assignment=True  # Validate during assignment
+    )
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ModelSettings":
+        """Create instance from dictionary with logging."""
+        logger.info("=== Creating ModelSettings from dict ===")
+        logger.info(f"Input data: {data}")
+        logger.info(f"Available fields: {cls.__fields__.keys()}")
+        
+        # Log any extra fields not in model
+        extra_fields = set(data.keys()) - set(cls.__fields__.keys())
+        if extra_fields:
+            logger.warning(f"Extra fields found in data: {extra_fields}")
+        
+        # Log LoRA-specific parameters
+        lora_params = {k: v for k, v in data.items() 
+                      if k in ['lora_rank', 'lora_alpha', 'target_modules', 'lora_dropout']}
+        logger.info(f"LoRA parameters found: {lora_params}")
+        
+        instance = cls(**data)
+        logger.info(f"Created instance with fields: {instance.model_dump().keys()}")
+        return instance
 
 class RewardWeights(BaseModel):
     """Reward function weights."""
@@ -257,7 +305,7 @@ class GRPOConfig(BaseModel):
 
     @classmethod
     def from_yaml(cls, config_path: Path) -> "GRPOConfig":
-        """Load configuration from YAML file."""
+        """Load configuration from YAML file with enhanced logging."""
         try:
             logger.info(f"Loading configuration from {config_path}")
             with open(config_path, 'r') as f:
@@ -273,31 +321,20 @@ class GRPOConfig(BaseModel):
             model_config = config_dict.get('model', {})
             logger.info(f"Model config keys: {model_config.keys()}")
             
-            # Verify LoRA parameters
-            lora_params = ['lora_rank', 'lora_alpha', 'target_modules', 'lora_dropout']
-            for param in lora_params:
-                if param not in model_config:
-                    logger.warning(f"Missing LoRA parameter '{param}' in config, using default")
-                logger.info(f"{param}: {model_config.get(param, ModelSettings.__fields__[param].default)}")
+            # Create ModelSettings first with detailed logging
+            logger.info("Creating ModelSettings instance...")
+            model_settings = ModelSettings.from_dict(model_config)
+            config_dict['model'] = model_settings.model_dump()
             
-            # Convert paths
-            if 'paths' in config_dict:
-                paths_config = config_dict['paths']
-                logger.info(f"Processing paths configuration: {paths_config}")
-                for key in ['data_path', 'output_dir', 'checkpoint_dir', 'log_dir', 'cache_dir']:
-                    if key in paths_config and paths_config[key]:
-                        paths_config[key] = Path(paths_config[key])
-                        logger.info(f"Converted {key} to Path: {paths_config[key]}")
-            
+            # Create main config
             config = cls(**config_dict)
-            logger.info("=== Configuration Validation ===")
+            logger.info("=== Final Configuration Verification ===")
             logger.info(f"Model settings: {config.model.model_dump()}")
-            logger.info(f"LoRA settings found: {hasattr(config.model, 'lora_rank')}")
-            logger.info(f"Successfully created config object: {config}")
+            logger.info(f"LoRA settings present: {hasattr(config.model, 'lora_rank')}")
+            
             return config
         except Exception as e:
-            logger.error(f"Error loading configuration from {config_path}: {str(e)}")
-            logger.error("Configuration structure:", exc_info=True)
+            logger.error(f"Error loading configuration: {str(e)}", exc_info=True)
             raise
 
     def save_to_yaml(self, config_path: Path) -> None:
