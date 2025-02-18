@@ -54,91 +54,109 @@ def train_model(config_path: Union[str, Path]) -> None:
         try:
             import unsloth
             import inspect
+            import torch
             
-            # Verify Unsloth installation and version
+            # Verify Unsloth and CUDA setup
             logger.info(f"Unsloth package location: {unsloth.__file__}")
-            logger.info(f"Available Unsloth modules: {dir(unsloth)}")
+            logger.info(f"CUDA available: {torch.cuda.is_available()}")
+            logger.info(f"Current CUDA device: {torch.cuda.current_device() if torch.cuda.is_available() else 'None'}")
+            logger.info(f"GPU Memory allocated: {torch.cuda.memory_allocated() if torch.cuda.is_available() else 0}")
             
-            # Inspect PatchFastRL function
-            patch_signature = inspect.signature(PatchFastRL)
-            logger.info(f"PatchFastRL signature: {patch_signature}")
-            logger.info(f"PatchFastRL parameters: {patch_signature.parameters}")
+            # Verify FastLanguageModel state
+            logger.info("=== FastLanguageModel Verification ===")
+            flm_attrs = dir(FastLanguageModel)
+            logger.info(f"FastLanguageModel methods: {[m for m in flm_attrs if not m.startswith('_')]}")
+            logger.info(f"GRPO-related attributes: {[m for m in flm_attrs if 'grpo' in m.lower()]}")
             
-            # Check for GRPO-specific attributes
-            logger.info(f"GRPO-related attributes: {[attr for attr in dir(unsloth) if 'grpo' in attr.lower()]}")
+            # Verify PatchFastRL
+            logger.info("=== PatchFastRL Verification ===")
+            patch_source = inspect.getsource(PatchFastRL)
+            logger.info(f"PatchFastRL source location: {inspect.getfile(PatchFastRL)}")
+            logger.info(f"PatchFastRL parameters: {inspect.signature(PatchFastRL).parameters}")
             
         except Exception as e:
-            logger.error(f"Unsloth verification failed: {str(e)}")
+            logger.error(f"Environment verification failed: {str(e)}")
             logger.error("Stack trace:", exc_info=True)
 
-        # Initialize model with enhanced logging
+        # Initialize model with enhanced state verification
         logger.info("=== Model Initialization ===")
         try:
-            # Base model config
+            # Base model config with explicit settings
             model_config = {
                 'model_name': training_config.model.name,
                 'trust_remote_code': True,
                 'cache_dir': str(training_config.paths.cache_dir) if training_config.paths.cache_dir else None,
                 'load_in_4bit': training_config.model.load_in_4bit,
                 'max_seq_length': training_config.model.max_seq_length,
-                'gpu_memory_utilization': training_config.model.gpu_memory_utilization
+                'gpu_memory_utilization': training_config.model.gpu_memory_utilization,
+                'use_flash_attention': training_config.model.use_flash_attention
             }
             
-            # Log initial state
+            # Log pre-loading state
             logger.info("=== Pre-Loading State ===")
-            logger.info(f"FastLanguageModel attributes: {dir(FastLanguageModel)}")
-            logger.info(f"GRPO patch status: {hasattr(FastLanguageModel, '_is_grpo_patched')}")
-            logger.info(f"Model config: {model_config}")
+            logger.info(f"Model configuration: {model_config}")
+            logger.info(f"Memory allocated: {torch.cuda.memory_allocated() if torch.cuda.is_available() else 0}")
             
-            # Load base model
             try:
+                # Load base model with state verification
+                logger.info("Loading base model...")
                 result = FastLanguageModel.from_pretrained(**model_config)
+                
                 if isinstance(result, tuple):
                     model, tokenizer = result
+                    logger.info("Model and tokenizer loaded successfully")
                 else:
                     model = result
                     tokenizer = None
+                    logger.info("Model loaded successfully (no tokenizer)")
                 
-                logger.info("=== Post-Loading State ===")
+                # Verify model state
+                logger.info("=== Model State Verification ===")
                 logger.info(f"Model type: {type(model)}")
-                logger.info(f"Model base classes: {model.__class__.__bases__}")
                 logger.info(f"Model device: {next(model.parameters()).device}")
                 logger.info(f"Model dtype: {next(model.parameters()).dtype}")
+                logger.info(f"Trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
+                logger.info(f"Model attributes: {[attr for attr in dir(model) if not attr.startswith('_')]}")
                 
-                # Verify model state before patching
-                logger.info("=== Pre-Patch Verification ===")
-                trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-                logger.info(f"Initial trainable parameters: {trainable_params:,}")
-                logger.info(f"Model methods: {[m for m in dir(model) if not m.startswith('_')]}")
-                
-                # Try GRPO patching with proper API usage
-                logger.info("=== GRPO Patching Attempt ===")
+                # Prepare model for GRPO
+                logger.info("=== GRPO Preparation ===")
                 try:
-                    # First attempt: Direct model patching
-                    logger.info("Attempting direct model patching")
+                    # First verify model is on correct device
+                    if torch.cuda.is_available():
+                        model = model.cuda()
+                        logger.info("Model moved to CUDA")
+                    
+                    # Apply GRPO patch with state verification
+                    logger.info("Attempting GRPO patching...")
+                    
+                    # First attempt: Global patch
+                    logger.info("Attempting global GRPO patch")
+                    PatchFastRL("GRPO", FastLanguageModel)
+                    logger.info("Global patch applied")
+                    
+                    # Second attempt: Instance patch
+                    logger.info("Attempting instance-level GRPO patch")
                     patched_model = PatchFastRL(model)
                     
-                    if patched_model is None:
-                        # Second attempt: With GRPO mode
-                        logger.info("First attempt returned None, trying with GRPO mode")
-                        patched_model = PatchFastRL("GRPO", model)
+                    if patched_model is not None:
+                        model = patched_model
+                        logger.info("Instance-level patch successful")
+                    else:
+                        logger.warning("Instance-level patch returned None, using globally patched model")
                     
-                    if patched_model is None:
-                        raise ValueError("Both patching attempts returned None")
-                    
-                    model = patched_model
-                    logger.info("=== Post-Patch State ===")
-                    logger.info(f"Patched model type: {type(model)}")
-                    logger.info(f"Model hierarchy: {type(model)} -> {type(getattr(model, 'base_model', None))}")
+                    # Verify final model state
+                    logger.info("=== Final Model State ===")
+                    logger.info(f"Final model type: {type(model)}")
                     logger.info(f"GRPO methods: {[m for m in dir(model) if 'grpo' in m.lower()]}")
+                    logger.info(f"Base model type: {type(getattr(model, 'base_model', None))}")
                     logger.info(f"Available methods: {[m for m in dir(model) if not m.startswith('_')]}")
+                    
+                    return model, tokenizer
                     
                 except Exception as e:
                     logger.error(f"GRPO patching failed: {str(e)}")
                     logger.error("Stack trace:", exc_info=True)
                     raise
-                
-                return model, tokenizer
                 
             except Exception as e:
                 logger.error(f"Model loading failed: {str(e)}")
