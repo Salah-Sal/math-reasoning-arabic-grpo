@@ -64,8 +64,9 @@ def train_model(config_path: Union[str, Path]) -> None:
         monitor.log_model_info(model)
         
         # Load dataset
+        logger.info(f"Loading dataset from {config.paths.data_path}")
         dataset = ArabicMathDataset(
-            data_path=config.paths.data_path,
+            data_dir=config.paths.data_path,
             cache_dir=config.paths.cache_dir
         )
         monitor.log_dataset_info(dataset)
