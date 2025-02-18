@@ -55,7 +55,7 @@ class EarlyStoppingCallback(BaseCallback):
         """Reset early stopping state."""
         self._best_reward = float('-inf')
         self._steps_without_improvement = 0
-        logger.debug("Reset early stopping state")
+        logger.info("Reset early stopping state")
     
     def _check_improvement(self, current_reward: float) -> bool:
         """Check if current reward shows sufficient improvement.
@@ -79,7 +79,7 @@ class EarlyStoppingCallback(BaseCallback):
         
         # Don't stop before minimum steps
         if current_step < self.min_steps:
-            logger.debug(f"Step {current_step}: Minimum steps not reached")
+            logger.info(f"Step {current_step}: Minimum steps not reached")
             return
         
         # Check for improvement
@@ -91,7 +91,7 @@ class EarlyStoppingCallback(BaseCallback):
             )
         else:
             self._steps_without_improvement += 1
-            logger.debug(
+            logger.info(
                 f"Step {current_step}: No improvement for {self._steps_without_improvement} steps"
                 f" (current: {current_reward:.4f}, best: {self._best_reward:.4f})"
             )
@@ -109,9 +109,9 @@ class EarlyStoppingCallback(BaseCallback):
     def _on_training_start(self) -> None:
         """Reset state at start of training."""
         self.reset()
-        logger.debug("Reset early stopping state at training start")
+        logger.info("Reset early stopping state at training start")
     
     def _on_training_end(self) -> None:
         """Clean up at end of training."""
         self.reset()
-        logger.debug("Reset early stopping state at training end") 
+        logger.info("Reset early stopping state at training end") 
