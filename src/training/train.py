@@ -81,24 +81,39 @@ def train_model(config_path: Union[str, Path]) -> None:
             logger.info("Step 0: Checking if global patch was applied")
             logger.info(f"FastLanguageModel patched status: {getattr(FastLanguageModel, '_is_patched', False)}")
             
-            logger.info("Step 1: Initializing FastLanguageModel")
-            model = FastLanguageModel.from_pretrained(**model_config)
-            logger.info(f"Model type after FastLanguageModel init: {type(model)}")
-            logger.info(f"Model attributes after FastLanguageModel init: {dir(model)}")
-            logger.info(f"Model config present: {hasattr(model, 'config')}")
-            if hasattr(model, 'config'):
-                logger.info(f"Model config attributes: {dir(model.config)}")
-            
-            logger.info("Step 2: Creating model configuration if missing")
+            # First load configuration
+            logger.info("Step 1: Loading model configuration")
             from transformers import AutoConfig
+            config = AutoConfig.from_pretrained(
+                model_config['model_name'],
+                trust_remote_code=True,
+                cache_dir=model_config.get('cache_dir')
+            )
+            logger.info(f"Loaded config type: {type(config)}")
+            logger.info(f"Config attributes: {dir(config)}")
+            
+            logger.info("Step 2: Initializing FastLanguageModel")
+            result = FastLanguageModel.from_pretrained(**model_config)
+            logger.info(f"FastLanguageModel.from_pretrained return type: {type(result)}")
+            
+            # Handle tuple return
+            if isinstance(result, tuple):
+                logger.info(f"Unpacking tuple of length {len(result)}")
+                model, tokenizer = result
+                logger.info(f"Unpacked model type: {type(model)}")
+                logger.info(f"Unpacked tokenizer type: {type(tokenizer)}")
+            else:
+                logger.info("Result is not a tuple, using as is")
+                model = result
+            
+            logger.info(f"Model type after initialization: {type(model)}")
+            logger.info(f"Model attributes: {dir(model)}")
+            
+            # Set configuration if needed
             if not hasattr(model, 'config'):
-                logger.info("Loading default configuration")
-                model.config = AutoConfig.from_pretrained(
-                    model_config['model_name'],
-                    trust_remote_code=True,
-                    cache_dir=model_config.get('cache_dir')
-                )
-                logger.info(f"Created config with attributes: {dir(model.config)}")
+                logger.info("Setting model configuration")
+                model.config = config
+                logger.info(f"Config set successfully: {hasattr(model, 'config')}")
             
             logger.info("Step 3: Applying PatchFastRL")
             patched_model = PatchFastRL(model)
@@ -117,6 +132,10 @@ def train_model(config_path: Union[str, Path]) -> None:
             logger.info(f"Final model config present: {hasattr(model, 'config')}")
             if hasattr(model, 'config'):
                 logger.info(f"Final config attributes: {dir(model.config)}")
+            
+            # Store tokenizer for later use
+            model.tokenizer = tokenizer
+            logger.info("Tokenizer attached to model")
             
             # Verify model configuration
             logger.info("=== Model Configuration Verification ===")
