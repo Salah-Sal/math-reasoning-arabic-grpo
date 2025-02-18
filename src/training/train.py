@@ -256,6 +256,38 @@ def train_model(config_path: Union[str, Path]) -> None:
         
         logger.info("=== Trainer Initialization ===")
         logger.info(f"Training arguments: {training_args}")
+        
+        # Setup PEFT before trainer initialization
+        logger.info("=== PEFT Configuration ===")
+        try:
+            from peft import LoraConfig, get_peft_model
+            
+            peft_config = LoraConfig(
+                r=training_config.model.lora_rank,
+                lora_alpha=training_config.model.lora_alpha,
+                target_modules=training_config.model.target_modules,
+                lora_dropout=0.05,
+                bias="none",
+                task_type="CAUSAL_LM"
+            )
+            logger.info(f"PEFT config: {peft_config}")
+            
+            # Apply PEFT configuration
+            logger.info("Applying PEFT configuration to model")
+            model = get_peft_model(model, peft_config)
+            logger.info("PEFT configuration applied successfully")
+            
+            # Verify PEFT setup
+            logger.info("=== PEFT Verification ===")
+            logger.info(f"Model has PEFT config: {hasattr(model, 'peft_config')}")
+            logger.info(f"Trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
+            logger.info(f"Total parameters: {sum(p.numel() for p in model.parameters())}")
+            logger.info(f"Percentage trainable: {(sum(p.numel() for p in model.parameters() if p.requires_grad) / sum(p.numel() for p in model.parameters())) * 100:.2f}%")
+            
+        except Exception as e:
+            logger.error(f"Error setting up PEFT: {str(e)}")
+            raise ValueError(f"Failed to setup PEFT adapters: {str(e)}")
+        
         logger.info("Initializing GRPO Trainer with reward functions...")
         
         trainer = GRPOTrainer(
@@ -263,7 +295,7 @@ def train_model(config_path: Union[str, Path]) -> None:
             args=training_args,
             train_dataset=dataset,
             callbacks=callbacks,
-            reward_funcs=[reward_handler.calculate_rewards]  # Add reward functions
+            reward_funcs=[reward_handler.calculate_rewards]
         )
         logger.info("GRPO Trainer initialized successfully")
         
