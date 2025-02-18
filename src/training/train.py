@@ -53,11 +53,23 @@ def train_model(config_path: Union[str, Path]) -> None:
         logger.info("=== Environment Verification ===")
         try:
             import unsloth
-            logger.info(f"Unsloth version: {unsloth.__version__}")
+            import inspect
+            
+            # Verify Unsloth installation and version
+            logger.info(f"Unsloth package location: {unsloth.__file__}")
             logger.info(f"Available Unsloth modules: {dir(unsloth)}")
-            logger.info(f"GRPO patch function: {getattr(unsloth, 'PatchFastRL', None)}")
+            
+            # Inspect PatchFastRL function
+            patch_signature = inspect.signature(PatchFastRL)
+            logger.info(f"PatchFastRL signature: {patch_signature}")
+            logger.info(f"PatchFastRL parameters: {patch_signature.parameters}")
+            
+            # Check for GRPO-specific attributes
+            logger.info(f"GRPO-related attributes: {[attr for attr in dir(unsloth) if 'grpo' in attr.lower()]}")
+            
         except Exception as e:
             logger.error(f"Unsloth verification failed: {str(e)}")
+            logger.error("Stack trace:", exc_info=True)
 
         # Initialize model with enhanced logging
         logger.info("=== Model Initialization ===")
@@ -99,29 +111,27 @@ def train_model(config_path: Union[str, Path]) -> None:
                 logger.info(f"Initial trainable parameters: {trainable_params:,}")
                 logger.info(f"Model methods: {[m for m in dir(model) if not m.startswith('_')]}")
                 
-                # Try GRPO patching with detailed error handling
+                # Try GRPO patching with proper API usage
                 logger.info("=== GRPO Patching Attempt ===")
                 try:
-                    # First, verify patch function
-                    patch_func = PatchFastRL
-                    logger.info(f"Patch function: {patch_func}")
-                    logger.info(f"Patch function signature: {getattr(patch_func, '__code__', None)}")
-                    
-                    # Attempt patching
-                    patched_model = patch_func(model)
+                    # First attempt: Direct model patching
+                    logger.info("Attempting direct model patching")
+                    patched_model = PatchFastRL(model)
                     
                     if patched_model is None:
-                        # Try alternative patching approach
-                        logger.info("Attempting alternative patching approach")
-                        patched_model = patch_func("GRPO", model, return_patched=True)
+                        # Second attempt: With GRPO mode
+                        logger.info("First attempt returned None, trying with GRPO mode")
+                        patched_model = PatchFastRL("GRPO", model)
                     
                     if patched_model is None:
-                        raise ValueError("GRPO patching returned None")
+                        raise ValueError("Both patching attempts returned None")
                     
                     model = patched_model
                     logger.info("=== Post-Patch State ===")
                     logger.info(f"Patched model type: {type(model)}")
+                    logger.info(f"Model hierarchy: {type(model)} -> {type(getattr(model, 'base_model', None))}")
                     logger.info(f"GRPO methods: {[m for m in dir(model) if 'grpo' in m.lower()]}")
+                    logger.info(f"Available methods: {[m for m in dir(model) if not m.startswith('_')]}")
                     
                 except Exception as e:
                     logger.error(f"GRPO patching failed: {str(e)}")
