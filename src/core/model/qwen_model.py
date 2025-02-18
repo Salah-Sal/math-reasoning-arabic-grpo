@@ -4,8 +4,12 @@ from src.core.model.base import BaseLanguageModel
 from src.infrastructure.logging import get_logger
 from transformers import PreTrainedModel, PreTrainedTokenizer
 from unsloth import FastLanguageModel, PatchFastRL
+from unsloth import is_bfloat16_supported
 
 logger = get_logger(__name__)
+
+# Apply the patch immediately
+PatchFastRL("GRPO", FastLanguageModel)
 
 class QwenModel(BaseLanguageModel):
     """Qwen model implementation with unsloth optimization."""
@@ -77,6 +81,13 @@ class QwenModel(BaseLanguageModel):
         try:
             logger.info("Setting up PEFT configuration")
             logger.info(f"Initial model type: {type(self.model)}")
+            
+            # Ensure we're using Unsloth's optimizations
+            if not hasattr(FastLanguageModel, 'get_peft_model'):
+                logger.warning("FastLanguageModel patches might not be properly applied")
+                logger.info("Reapplying Unsloth patches")
+                PatchFastRL()
+            
             self.model = FastLanguageModel.get_peft_model(
                 self.model,
                 r=lora_rank,
@@ -86,9 +97,18 @@ class QwenModel(BaseLanguageModel):
                 random_state=random_state,
                 **kwargs
             )
+            
             logger.info(f"Post-PEFT model type: {type(self.model)}")
             logger.info(f"Model attributes: {dir(self.model)}")
+            
+            # Validate PEFT setup
+            if not hasattr(self.model, 'base_model'):
+                logger.error("PEFT model structure not as expected")
+                raise ValueError("PEFT setup did not create expected model structure")
+            
             logger.info(f"Model base attributes: {dir(self.model.base_model)}")
+            logger.info("PEFT setup completed successfully with Unsloth optimizations")
+            
             return self.model
         except Exception as e:
             logger.error(f"PEFT setup failed: {str(e)}")
@@ -113,9 +133,16 @@ class QwenModel(BaseLanguageModel):
             logger.info(f"Saving model to {output_dir} using method {save_method}")
             
             if save_method == "lora":
-                self.model.save_lora(output_dir)
-                logger.info("LoRA weights saved successfully")
+                # Get the base FastLanguageModel instance
+                if hasattr(self.model, 'base_model') and hasattr(self.model.base_model, 'save_pretrained'):
+                    logger.info("Saving LoRA weights using PEFT base model")
+                    self.model.base_model.save_pretrained(output_dir)
+                    logger.info("LoRA weights saved successfully")
+                else:
+                    logger.error("Model does not have expected LoRA structure")
+                    raise ValueError("Model structure not compatible with LoRA saving")
             elif save_method == "merged_4bit":
+                logger.info("Saving merged model with Unsloth optimizations")
                 self.model.save_pretrained_merged(
                     output_dir,
                     self.tokenizer,
@@ -126,4 +153,4 @@ class QwenModel(BaseLanguageModel):
                 raise ValueError(f"Unsupported save method: {save_method}")
         except Exception as e:
             logger.error(f"Save failed: {str(e)}")
-            raise 
+            raise
