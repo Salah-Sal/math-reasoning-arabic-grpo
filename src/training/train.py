@@ -58,6 +58,11 @@ def train_model(config_path: Union[str, Path]) -> None:
             logger.info(f"Model settings type: {type(training_config.model)}")
             logger.info(f"Available fields: {training_config.model.model_dump().keys()}")
             
+            # Log initial state
+            logger.info("=== Initial State ===")
+            logger.info(f"GRPO Patch Status: {hasattr(FastLanguageModel, '_is_grpo_patched')}")
+            logger.info(f"Available Unsloth methods: {[m for m in dir(FastLanguageModel) if not m.startswith('_')]}")
+            
             # Separate flash attention config
             use_flash_attention = training_config.model.get_field_value('use_flash_attention', True)
             logger.info(f"Flash attention setting detected: {use_flash_attention}")
@@ -91,22 +96,61 @@ def train_model(config_path: Union[str, Path]) -> None:
                     model = result
                     tokenizer = None
                 
-                # Configure flash attention through Unsloth if supported
-                if use_flash_attention and hasattr(model, 'enable_flash_attention'):
-                    logger.info("Enabling flash attention through Unsloth")
-                    model.enable_flash_attention()
-                
-                logger.info(f"Model initialization successful")
+                logger.info("=== Post-Loading State ===")
                 logger.info(f"Model type: {type(model)}")
-                logger.info(f"Flash attention status: {getattr(model, 'using_flash_attention', False)}")
+                logger.info(f"Model base class: {model.__class__.__bases__}")
+                logger.info(f"Available model methods: {[m for m in dir(model) if not m.startswith('_')]}")
+                
+                # Step 2: Apply GRPO patch BEFORE PEFT
+                logger.info("Step 2: Applying GRPO patch")
+                try:
+                    # Remove global patch if exists
+                    if hasattr(FastLanguageModel, '_is_grpo_patched'):
+                        logger.info("Removing existing GRPO patch")
+                        delattr(FastLanguageModel, '_is_grpo_patched')
+                    
+                    # Apply GRPO patch
+                    model = PatchFastRL("GRPO", model)
+                    if model is None:
+                        raise ValueError("GRPO patching returned None")
+                    
+                    logger.info("=== Post-GRPO State ===")
+                    logger.info(f"Model type after GRPO: {type(model)}")
+                    logger.info(f"GRPO methods present: {[m for m in dir(model) if 'grpo' in m.lower()]}")
+                except Exception as e:
+                    logger.error(f"GRPO patching error: {str(e)}")
+                    raise
+                
+                # Step 3: Apply PEFT after GRPO
+                logger.info("Step 3: Applying PEFT configuration")
+                try:
+                    model = FastLanguageModel.get_peft_model(
+                        model,
+                        **peft_config
+                    )
+                    logger.info("=== Post-PEFT State ===")
+                    logger.info(f"Model type after PEFT: {type(model)}")
+                    logger.info(f"PEFT config present: {hasattr(model, 'peft_config')}")
+                    logger.info(f"Trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
+                except Exception as e:
+                    logger.error(f"PEFT application error: {str(e)}")
+                    raise
+                
+                # Final verification
+                logger.info("=== Final State ===")
+                logger.info(f"Final model type: {type(model)}")
+                logger.info(f"GRPO methods present: {[m for m in dir(model) if 'grpo' in m.lower()]}")
+                logger.info(f"PEFT attributes present: {[a for a in dir(model) if 'peft' in a.lower()]}")
+                
+                return model, tokenizer
                 
             except Exception as e:
                 logger.error(f"Model initialization error: {str(e)}")
                 logger.error("Stack trace:", exc_info=True)
                 raise
             
-            # Step 2: Verify PEFT configuration
-            logger.info("Step 2: Verifying PEFT configuration")
+            # Step 4: Verify PEFT configuration
+            logger.info("Step 4: Verifying PEFT configuration")
             use_gradient_checkpointing = training_config.memory.use_gradient_checkpointing
             logger.info(f"Gradient checkpointing setting: {use_gradient_checkpointing} (type: {type(use_gradient_checkpointing)})")
             
@@ -122,8 +166,8 @@ def train_model(config_path: Union[str, Path]) -> None:
             }
             logger.info(f"PEFT configuration: {peft_config}")
             
-            # Step 3: Apply PEFT before GRPO patch
-            logger.info("Step 3: Applying PEFT configuration")
+            # Step 5: Apply PEFT before GRPO patch
+            logger.info("Step 5: Applying PEFT configuration")
             try:
                 model = FastLanguageModel.get_peft_model(
                     model,
@@ -134,13 +178,13 @@ def train_model(config_path: Union[str, Path]) -> None:
                 logger.error(f"Error applying PEFT: {str(e)}")
                 raise ValueError(f"PEFT setup failed: {str(e)}")
             
-            # Step 4: Verify PEFT setup
-            logger.info("Step 4: Verifying PEFT setup")
+            # Step 6: Verify PEFT setup
+            logger.info("Step 6: Verifying PEFT setup")
             logger.info(f"Model has PEFT config: {hasattr(model, 'peft_config')}")
             logger.info(f"Trainable parameters after PEFT: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
             
-            # Step 5: Apply GRPO patch
-            logger.info("Step 5: Applying GRPO patch")
+            # Step 7: Apply GRPO patch
+            logger.info("Step 7: Applying GRPO patch")
             model = PatchFastRL(model)
             if model is None:
                 raise ValueError("GRPO patching failed - model is None")
@@ -148,8 +192,8 @@ def train_model(config_path: Union[str, Path]) -> None:
             logger.info(f"Final model type: {type(model)}")
             logger.info(f"PEFT config still present: {hasattr(model, 'peft_config')}")
             
-            # Step 6: Final verification
-            logger.info("Step 6: Final model verification")
+            # Step 8: Final verification
+            logger.info("Step 8: Final model verification")
             trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
             total_params = sum(p.numel() for p in model.parameters())
             logger.info(f"Final trainable parameters: {trainable_params:,}")
