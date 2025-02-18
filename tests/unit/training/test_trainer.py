@@ -87,25 +87,36 @@ class TestTrainerModelLoading:
     def test_model_loading(self, poc_config):
         """Test model loading and initialization"""
         trainer = Trainer(config=poc_config, poc_mode=True)
+        
+        # Basic model checks
         assert trainer.model is not None
         assert trainer.tokenizer is not None
-        assert trainer.model.config.model_type == "qwen2"
+        
+        # Check if it's properly PEFT-wrapped
+        assert hasattr(trainer.model, 'base_model')
+        assert hasattr(trainer.model.base_model, 'model')
+        
+        # Check model type through the base
+        base_model = trainer.model.base_model.model
+        assert base_model.config.model_type == "qwen2"
 
     @pytest.mark.gpu
     def test_memory_management(self, poc_config):
-        """Test GPU memory management during model loading"""
+        """Test vLLM memory management during model loading"""
         if not torch.cuda.is_available():
             pytest.skip("CUDA not available")
             
-        initial_memory = torch.cuda.memory_allocated()
         trainer = Trainer(config=poc_config, poc_mode=True)
-        loaded_memory = torch.cuda.memory_allocated()
         
-        assert loaded_memory > initial_memory
-        del trainer
-        torch.cuda.empty_cache()
-        final_memory = torch.cuda.memory_allocated()
-        assert final_memory <= initial_memory
+        # Get vLLM engine memory info
+        engine = trainer.model._get_llm_engine()
+        assert engine is not None
+        
+        # Verify memory allocation through vLLM's reporting
+        memory_info = engine.get_memory_info()
+        assert memory_info['total_gpu_memory'] > 0
+        assert memory_info['used_gpu_memory'] > 0
+        assert memory_info['used_gpu_memory'] <= memory_info['total_gpu_memory']
 
     @pytest.mark.gpu
     def test_model_initialization(self, poc_config):

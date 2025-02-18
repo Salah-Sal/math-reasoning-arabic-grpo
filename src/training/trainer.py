@@ -14,16 +14,15 @@ class Trainer:
     
     def _adjust_config_for_gpu(self, config: ProjectConfig) -> ProjectConfig:
         """Create a new config with adjusted settings for GPU constraints"""
+        config_dict = config.model_dump()
         if torch.cuda.get_device_properties(0).total_memory < 10 * 1024**3:
-            config_dict = config.model_dump()
             config_dict['model']['max_seq_length'] = 256
-            config_dict['model']['gpu_memory_utilization'] = 0.6
+            config_dict['model']['gpu_memory_utilization'] = 0.85
             config_dict['training']['per_device_train_batch_size'] = 1
             config_dict['training']['gradient_accumulation_steps'] = 1
             config_dict['training']['num_generations'] = 4
             logger.info("Adjusted settings for 8GB GPU")
-            return ProjectConfig(**config_dict)
-        return config
+        return ProjectConfig(**config_dict)
 
     def __init__(
         self,
