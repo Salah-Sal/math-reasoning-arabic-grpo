@@ -63,17 +63,13 @@ class Trainer:
     def _initialize_model(self):
         """Initialize the model and tokenizer."""
         try:
-            # Clear memory before loading model
-            clear_memory()
+            logger.info("Starting model initialization")
             
-            # Check available GPU memory
-            free_memory, total_memory = torch.cuda.mem_get_info()
-            total_gb = total_memory / 1024**3
-            free_gb = free_memory / 1024**3
+            # Log pre-initialization state
+            if torch.cuda.is_available():
+                logger.info(f"Initial GPU memory allocated: {torch.cuda.memory_allocated() / 1024**3:.2f}GB")
             
-            logger.info(f"GPU Memory: {free_gb:.2f}GB free of {total_gb:.2f}GB total")
-            
-            logger.info(f"Loading model: {self.config.model.model_name}")
+            # Load base model
             self.model, self.tokenizer = FastLanguageModel.from_pretrained(
                 model_name=self.config.model.model_name,
                 max_seq_length=self.config.model.max_seq_length,
@@ -83,17 +79,25 @@ class Trainer:
                 gpu_memory_utilization=self.config.model.gpu_memory_utilization
             )
             
-            # Configure PEFT with optimized settings
+            # Log post-base model state
+            logger.info(f"Base model type: {type(self.model)}")
+            logger.info(f"Has fast_inference: {hasattr(self.model, 'fast_inference')}")
+            logger.info(f"GPU memory after base model: {torch.cuda.memory_allocated() / 1024**3:.2f}GB")
+            
+            # Configure PEFT
             self.model = FastLanguageModel.get_peft_model(
                 self.model,
                 r=self.config.model.max_lora_rank,
                 target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
                 lora_alpha=16,
-                use_gradient_checkpointing="unsloth",  # Enable Unsloth optimizations
+                use_gradient_checkpointing="unsloth",
                 random_state=3407,
             )
             
-            logger.info("Model initialization completed")
+            # Log final state
+            logger.info(f"Final model type: {type(self.model)}")
+            logger.info(f"Has fast_inference after PEFT: {hasattr(self.model, 'fast_inference')}")
+            logger.info(f"Final GPU memory: {torch.cuda.memory_allocated() / 1024**3:.2f}GB")
             
         except Exception as e:
             logger.error(f"Failed to initialize model: {str(e)}")
