@@ -91,17 +91,50 @@ class ArabicMathDataset:
             logger.error(f"Error converting to HuggingFace Dataset: {str(e)}")
             raise
     
-    def sample_batch(self, batch_size: int) -> Dict:
-        """Sample a batch of examples for monitoring."""
+    def sample_batch(self, batch_size: Optional[int] = None) -> Dict:
+        """Sample a batch of examples for monitoring.
+        
+        Args:
+            batch_size: Optional batch size, defaults to per_device_train_batch_size if None
+            
+        Returns:
+            Dictionary containing batch examples
+        """
+        logger.info(f"Sampling batch with size {batch_size}")
+        
         if not self._data:
             logger.warning("No data available for sampling")
             return {}
         
-        import random
-        indices = random.sample(range(len(self._data)), min(batch_size, len(self._data)))
-        batch = [self._data[i] for i in indices]
-        logger.info(f"Sampled batch of size {len(batch)}")
-        return {'examples': batch}
+        # Use default batch size if none provided
+        effective_batch_size = batch_size or 8  # Default from notebook
+        logger.info(f"Using effective batch size: {effective_batch_size}")
+        
+        try:
+            import random
+            indices = random.sample(range(len(self._data)), min(effective_batch_size, len(self._data)))
+            batch = [self._data[i] for i in indices]
+            
+            # Log batch statistics
+            logger.info(f"Sampled batch of size {len(batch)}")
+            if batch:
+                logger.debug("First example in batch:")
+                logger.debug(f"  Prompt length: {len(str(batch[0]['prompt']))}")
+                logger.debug(f"  Answer length: {len(str(batch[0]['answer']))}")
+            
+            return {
+                'examples': batch,
+                'size': len(batch),
+                'original_size': effective_batch_size
+            }
+            
+        except Exception as e:
+            logger.error(f"Error sampling batch: {str(e)}")
+            return {
+                'examples': [],
+                'size': 0,
+                'error': str(e)
+            }
     
     def _load_data(self) -> None:
         """Load and process all JSON files in the data directory."""

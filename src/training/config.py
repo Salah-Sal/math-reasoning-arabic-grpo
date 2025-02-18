@@ -63,6 +63,19 @@ class TrainingSettings(BaseModel):
         description="Where to report results (none/wandb/tensorboard)"
     )
 
+    @property
+    def batch_size(self) -> int:
+        """Alias for per_device_train_batch_size to maintain compatibility."""
+        return self.per_device_train_batch_size
+    
+    def model_dump(self) -> Dict[str, Any]:
+        """Enhanced model dump with logging."""
+        data = super().model_dump()
+        logger.info("Training settings:")
+        for key, value in data.items():
+            logger.info(f"  {key}: {value}")
+        return data
+
 class MemorySettings(BaseModel):
     """Memory management settings."""
     gpu_memory_utilization: float = Field(

@@ -63,7 +63,7 @@ def train_model(config_path: Union[str, Path]) -> None:
         
         monitor.log_model_info(model)
         
-        # Load dataset
+        # Load dataset with detailed logging
         logger.info(f"Loading dataset from {config.paths.data_path}")
         dataset = ArabicMathDataset(
             data_dir=config.paths.data_path,
@@ -71,9 +71,18 @@ def train_model(config_path: Union[str, Path]) -> None:
         )
         monitor.log_dataset_info(dataset)
         
-        # Sample a batch for monitoring
-        batch = dataset.sample_batch(config.training.batch_size)
-        monitor.log_batch_processing(batch)
+        # Sample a batch for monitoring with enhanced error handling
+        logger.info("Sampling batch for monitoring")
+        try:
+            batch = dataset.sample_batch(config.training.per_device_train_batch_size)
+            if not batch.get('examples'):
+                logger.warning("No examples in sampled batch")
+            else:
+                logger.info(f"Successfully sampled batch of {batch['size']} examples")
+            monitor.log_batch_processing(batch)
+        except Exception as e:
+            logger.error(f"Error sampling batch: {str(e)}")
+            logger.warning("Continuing without batch monitoring")
         
         # Initialize callbacks
         callbacks = [
