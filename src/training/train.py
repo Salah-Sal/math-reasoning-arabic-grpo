@@ -77,6 +77,10 @@ def train_model(config_path: Union[str, Path]) -> None:
         logger.info(f"PatchFastRL attributes: {dir(PatchFastRL)}")
         
         try:
+            # Remove global patch
+            logger.info("Step 0: Checking if global patch was applied")
+            logger.info(f"FastLanguageModel patched status: {getattr(FastLanguageModel, '_is_patched', False)}")
+            
             logger.info("Step 1: Initializing FastLanguageModel")
             model = FastLanguageModel.from_pretrained(**model_config)
             logger.info(f"Model type after FastLanguageModel init: {type(model)}")
@@ -85,13 +89,34 @@ def train_model(config_path: Union[str, Path]) -> None:
             if hasattr(model, 'config'):
                 logger.info(f"Model config attributes: {dir(model.config)}")
             
-            logger.info("Step 2: Applying PatchFastRL")
-            model = PatchFastRL(model)
-            logger.info(f"Model type after patch: {type(model)}")
-            logger.info(f"Model attributes after patch: {dir(model)}")
-            logger.info(f"Model config present after patch: {hasattr(model, 'config')}")
+            logger.info("Step 2: Creating model configuration if missing")
+            from transformers import AutoConfig
+            if not hasattr(model, 'config'):
+                logger.info("Loading default configuration")
+                model.config = AutoConfig.from_pretrained(
+                    model_config['model_name'],
+                    trust_remote_code=True,
+                    cache_dir=model_config.get('cache_dir')
+                )
+                logger.info(f"Created config with attributes: {dir(model.config)}")
+            
+            logger.info("Step 3: Applying PatchFastRL")
+            patched_model = PatchFastRL(model)
+            logger.info(f"PatchFastRL return type: {type(patched_model)}")
+            
+            # Handle different return types from PatchFastRL
+            if callable(patched_model):
+                logger.info("PatchFastRL returned a function, applying it to model")
+                model = patched_model(model)
+            else:
+                logger.info("PatchFastRL returned a model directly")
+                model = patched_model
+            
+            logger.info(f"Final model type: {type(model)}")
+            logger.info(f"Final model attributes: {dir(model)}")
+            logger.info(f"Final model config present: {hasattr(model, 'config')}")
             if hasattr(model, 'config'):
-                logger.info(f"Model config attributes after patch: {dir(model.config)}")
+                logger.info(f"Final config attributes: {dir(model.config)}")
             
             # Verify model configuration
             logger.info("=== Model Configuration Verification ===")
@@ -102,7 +127,8 @@ def train_model(config_path: Union[str, Path]) -> None:
                 if hasattr(model.config, 'torch_dtype'):
                     logger.info(f"torch_dtype value: {model.config.torch_dtype}")
             else:
-                logger.error("Model configuration is missing!")
+                logger.error("Model configuration is still missing after fixes!")
+                raise ValueError("Model configuration could not be initialized")
                 
             # Verify model state
             logger.info("=== Model State Verification ===")
