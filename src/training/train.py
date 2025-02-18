@@ -84,27 +84,36 @@ def train_model(config_path: Union[str, Path]) -> None:
             logger.error(f"Error sampling batch: {str(e)}")
             logger.warning("Continuing without batch monitoring")
         
-        # Initialize callbacks
+        # Initialize callbacks with enhanced logging
+        logger.info("=== Initializing Callbacks ===")
+        
+        # Prepare checkpoint callback with proper config access
+        checkpoint_config = {
+            'checkpoint_dir': config.paths.checkpoint_dir,
+            'save_steps': config.training.save_steps,
+            'max_checkpoints': config.training.max_checkpoints,  # Changed from memory to training
+            'save_best': True,
+            'save_final': True
+        }
+        logger.info(f"Checkpoint configuration: {checkpoint_config}")
+        
         callbacks = [
             monitor,
-            ModelCheckpointCallback(
-                checkpoint_dir=config.paths.checkpoint_dir,
-                save_steps=config.training.save_steps,
-                max_checkpoints=config.memory.max_checkpoints,
-                save_best=True,
-                save_final=True
-            )
+            ModelCheckpointCallback(**checkpoint_config)
         ]
         
         # Add early stopping if enabled
         if config.early_stopping.enabled:
-            callbacks.append(
-                EarlyStoppingCallback(
-                    patience=config.early_stopping.patience,
-                    min_improvement=config.early_stopping.min_improvement,
-                    min_steps=config.early_stopping.min_steps
-                )
-            )
+            early_stopping_config = {
+                'patience': config.early_stopping.patience,
+                'min_improvement': config.early_stopping.min_improvement,
+                'min_steps': config.early_stopping.min_steps
+            }
+            logger.info(f"Early stopping configuration: {early_stopping_config}")
+            callbacks.append(EarlyStoppingCallback(**early_stopping_config))
+        
+        logger.info(f"Initialized {len(callbacks)} callbacks")
+        logger.info("=============================")
         
         # Initialize trainer with TRL config
         training_args = TRLConfig(
