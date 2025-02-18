@@ -131,48 +131,84 @@ def train_model(config_path: Union[str, Path]) -> None:
         # Initialize model with enhanced error handling
         logger.info("=== Model Loading Process ===")
         try:
-            # Log Unsloth configuration
-            logger.info("=== Unsloth Configuration Verification ===")
-            from unsloth.models.loader import dispatch_model
+            # Verify Unsloth installation
+            logger.info("=== Unsloth Installation Verification ===")
+            import unsloth
+            import importlib
+            import sys
             
-            logger.info(f"Model name: {base_model_config['model_name']}")
-            logger.info(f"Detected model type: {'qwen' if 'qwen' in base_model_config['model_name'].lower() else 'unknown'}")
+            # Log module information
+            logger.info(f"Unsloth version: {getattr(unsloth, '__version__', 'Unknown')}")
+            logger.info(f"Unsloth path: {unsloth.__file__}")
+            logger.info(f"Python path: {sys.path}")
             
-            # Inspect Unsloth's model handling
-            logger.info("=== Model Dispatch Information ===")
-            dispatch_info = {
-                'available_handlers': [m for m in dir(dispatch_model) if not m.startswith('_')],
-                'model_types': getattr(dispatch_model, 'MODEL_TYPES', 'Not found'),
-                'default_dtype': getattr(dispatch_model, 'default_dtype', 'Not found')
+            # Inspect available modules
+            logger.info("=== Available Unsloth Modules ===")
+            unsloth_modules = {
+                name: importlib.util.find_spec(f"unsloth.{name}")
+                for name in ['models', 'utils', 'safetensors']
             }
-            logger.info(f"Dispatch info: {dispatch_info}")
+            logger.info(f"Module availability: {unsloth_modules}")
             
-            # Get model-specific configuration
-            logger.info("=== Model-Specific Configuration ===")
-            from transformers import AutoConfig
-            model_config = AutoConfig.from_pretrained(
-                base_model_config['model_name'],
-                trust_remote_code=True
-            )
-            logger.info(f"Model architecture: {model_config.architectures if hasattr(model_config, 'architectures') else 'Unknown'}")
-            logger.info(f"Model config type: {type(model_config).__name__}")
+            # Inspect models module structure
+            logger.info("=== Models Module Structure ===")
+            if hasattr(unsloth, 'models'):
+                logger.info(f"Available in models: {dir(unsloth.models)}")
+                logger.info(f"Loader contents: {dir(unsloth.models.loader) if hasattr(unsloth.models, 'loader') else 'No loader module'}")
             
-            # Check if bfloat16 is supported
-            bf16_supported = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
-            logger.info(f"bfloat16 support: {bf16_supported}")
+            # Check for Qwen support
+            logger.info("=== Model Support Verification ===")
+            model_name = base_model_config['model_name'].lower()
+            qwen_support = any('qwen' in str(m).lower() for m in dir(unsloth.models))
+            logger.info(f"Qwen support detected: {qwen_support}")
             
-            # Set dtype based on support
-            if bf16_supported:
-                base_model_config['torch_dtype'] = torch.bfloat16
-                logger.info("Using bfloat16 for model")
+            # Try alternative model loading approaches
+            logger.info("=== Model Loading Attempt ===")
+            if 'qwen' in model_name:
+                logger.info("Attempting Qwen-specific loading")
+                try:
+                    # Try direct model loading
+                    result = FastLanguageModel.from_pretrained(
+                        model_name=base_model_config['model_name'],
+                        max_seq_length=training_config.model.max_seq_length,
+                        load_in_4bit=training_config.model.load_in_4bit,
+                        device_map='auto'
+                    )
+                    logger.info("Direct model loading successful")
+                except Exception as e:
+                    logger.error(f"Direct loading failed: {str(e)}")
+                    # Try alternative loading method
+                    try:
+                        from transformers import AutoModelForCausalLM, AutoTokenizer
+                        logger.info("Attempting alternative loading method")
+                        
+                        # Load tokenizer first
+                        tokenizer = AutoTokenizer.from_pretrained(
+                            base_model_config['model_name'],
+                            trust_remote_code=True
+                        )
+                        
+                        # Load model with minimal config
+                        model = AutoModelForCausalLM.from_pretrained(
+                            base_model_config['model_name'],
+                            trust_remote_code=True,
+                            device_map='auto',
+                            torch_dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+                        )
+                        
+                        # Apply Unsloth optimization
+                        logger.info("Applying Unsloth optimization")
+                        model = FastLanguageModel.get_fast_model(model)
+                        result = (model, tokenizer)
+                        logger.info("Alternative loading successful")
+                    except Exception as e2:
+                        logger.error(f"Alternative loading failed: {str(e2)}")
+                        raise
             else:
-                base_model_config['torch_dtype'] = torch.float16
-                logger.info("Falling back to float16")
+                logger.error(f"Unsupported model type: {model_name}")
+                raise ValueError(f"Unsupported model type: {model_name}")
             
-            # Initialize model
-            logger.info(f"Final model config: {base_model_config}")
-            result = FastLanguageModel.from_pretrained(**base_model_config)
-            
+            # Process result
             if result is None:
                 raise ValueError("Model initialization failed - explicit None check")
             
@@ -180,22 +216,15 @@ def train_model(config_path: Union[str, Path]) -> None:
                 if len(result) != 2:
                     raise ValueError(f"Expected (model, tokenizer) tuple, got tuple of length {len(result)}")
                 model, tokenizer = result
+                logger.info("Successfully unpacked model and tokenizer")
             else:
                 model = result
                 tokenizer = None
+                logger.info("Got model without tokenizer")
             
-            if model is None:
-                raise ValueError("Model is None after unpacking")
-            
-            # Verify model initialization
-            logger.info(f"Model initialized: {type(model)}")
-            logger.info(f"Model parameters: {sum(p.numel() for p in model.parameters())}")
-            
-            # Handle device placement
-            if torch.cuda.is_available():
-                device = torch.device(f'cuda:{torch.cuda.current_device()}')
-                model = model.to(device)
-                logger.info(f"Model moved to device: {device}")
+            # Verify model
+            logger.info(f"Model type: {type(model)}")
+            logger.info(f"Model config: {model.config if hasattr(model, 'config') else 'No config'}")
             
             return model, tokenizer
             
@@ -205,6 +234,7 @@ def train_model(config_path: Union[str, Path]) -> None:
             logger.error(f"Base config: {base_model_config}")
             logger.error(f"CUDA state: {torch.cuda.is_available()}")
             logger.error(f"Memory state: {torch.cuda.memory_allocated() / 1024**2:.2f}MB")
+            logger.error(f"Unsloth state: {dir(unsloth) if 'unsloth' in locals() else 'Not imported'}")
             raise
 
         # Initialize trainer with verified model
