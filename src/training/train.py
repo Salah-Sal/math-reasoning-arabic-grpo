@@ -90,142 +90,82 @@ def train_model(config_path: Union[str, Path]) -> None:
         monitor = TrainingMonitor(log_dir=Path("logs/training"))
         monitor.log_system_info()
         
+        # Enhanced version logging
+        logger.info("=== Version Verification ===")
+        import torch
+        import transformers
+        import unsloth
+        logger.info(f"PyTorch: {torch.__version__}")
+        logger.info(f"Transformers: {transformers.__version__}")
+        logger.info(f"Unsloth: {get_unsloth_version()}")
+        logger.info(f"CUDA Available: {torch.cuda.is_available()}")
+        if torch.cuda.is_available():
+            logger.info(f"CUDA Version: {torch.version.cuda}")
+            logger.info(f"GPU: {torch.cuda.get_device_name()}")
+        
+        # Memory state logging
+        logger.info("=== Initial Memory State ===")
+        if torch.cuda.is_available():
+            logger.info(f"CUDA Memory Allocated: {torch.cuda.memory_allocated() / 1024**2:.2f}MB")
+            logger.info(f"CUDA Memory Reserved: {torch.cuda.memory_reserved() / 1024**2:.2f}MB")
+            logger.info(f"Max Memory: {torch.cuda.max_memory_allocated() / 1024**2:.2f}MB")
+        
         # Load configuration with detailed logging
         logger.info(f"Loading configuration from {config_path}")
         training_config = GRPOConfig.from_yaml(config_path)
         
-        # Log full configuration structure
-        logger.info("=== Configuration Structure ===")
-        logger.info(f"Available top-level keys: {training_config.model_dump().keys()}")
-        logger.info(f"Training settings: {training_config.training.model_dump()}")
-        logger.info(f"Memory settings: {training_config.memory.model_dump()}")
-        logger.info(f"Path settings: {training_config.paths.model_dump()}")
-        logger.info("=============================")
+        # Verify Unsloth installation and patches
+        logger.info("=== Unsloth Verification ===")
+        logger.info(f"FastLanguageModel available: {hasattr(unsloth, 'FastLanguageModel')}")
+        logger.info(f"PatchFastRL available: {hasattr(unsloth, 'PatchFastRL')}")
         
-        # Log monitor methods
-        logger.info("=== Monitor Methods ===")
-        logger.info(f"Available monitor methods: {[method for method in dir(monitor) if not method.startswith('_')]}")
-        logger.info("=====================")
+        # Model type detection
+        model_name = training_config.model.name.lower()
+        logger.info(f"Detected model type: {'qwen' if 'qwen' in model_name else 'unknown'}")
         
-        # Verify path resolution
-        logger.info("=== Path Resolution ===")
-        logger.info(f"Config path resolved to: {Path(config_path).resolve()}")
-        logger.info(f"Cache dir resolved to: {training_config.paths.cache_dir.resolve() if training_config.paths.cache_dir else 'None'}")
-        logger.info("=====================")
+        # Configuration validation
+        logger.info("=== Configuration Validation ===")
+        logger.info(f"Model config: {training_config.model.model_dump()}")
+        logger.info(f"Memory config: {training_config.memory.model_dump()}")
         
-        # Verify compatibility first
-        verify_compatibility()
-        
-        # Set up environment
-        os.environ['TRUST_REMOTE_CODE'] = '1'
+        # Clear CUDA cache before model loading
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        
-        # Update base configuration
-        base_model_config = {
-            'model_name': training_config.model.name,  # Add model name
-            'device_map': 'auto',
-            'low_cpu_mem_usage': True
-        }
+            logger.info("Cleared CUDA cache")
         
         # Initialize model with enhanced error handling
         logger.info("=== Model Loading Process ===")
         try:
-            # Verify Unsloth installation
-            logger.info("=== Unsloth Installation Verification ===")
-            import unsloth
-            import importlib
-            import sys
+            # Verify Unsloth patches
+            logger.info("Applying Unsloth patches...")
+            PatchFastRL("GRPO", FastLanguageModel)
+            logger.info("Patches applied successfully")
             
-            # Log module information
-            logger.info(f"Unsloth version: {getattr(unsloth, '__version__', 'Unknown')}")
-            logger.info(f"Unsloth path: {unsloth.__file__}")
-            logger.info(f"Python path: {sys.path}")
+            # Log model loading attempt
+            logger.info(f"Loading model: {training_config.model.name}")
+            logger.info(f"Loading configuration: {base_model_config}")
             
-            # Inspect available modules
-            logger.info("=== Available Unsloth Modules ===")
-            unsloth_modules = {
-                name: importlib.util.find_spec(f"unsloth.{name}")
-                for name in ['models', 'utils', 'safetensors']
-            }
-            logger.info(f"Module availability: {unsloth_modules}")
+            # Memory check before loading
+            if torch.cuda.is_available():
+                logger.info(f"Pre-load CUDA Memory: {torch.cuda.memory_allocated() / 1024**2:.2f}MB")
             
-            # Inspect models module structure
-            logger.info("=== Models Module Structure ===")
-            if hasattr(unsloth, 'models'):
-                logger.info(f"Available in models: {dir(unsloth.models)}")
-                logger.info(f"Loader contents: {dir(unsloth.models.loader) if hasattr(unsloth.models, 'loader') else 'No loader module'}")
+            # Try loading model
+            result = FastLanguageModel.from_pretrained(
+                model_name=base_model_config['model_name'],
+                max_seq_length=training_config.model.max_seq_length,
+                load_in_4bit=training_config.model.load_in_4bit,
+                device_map='auto'
+            )
             
-            # Check for Qwen support
-            logger.info("=== Model Support Verification ===")
-            model_name = base_model_config['model_name'].lower()
-            qwen_support = any('qwen' in str(m).lower() for m in dir(unsloth.models))
-            logger.info(f"Qwen support detected: {qwen_support}")
-            
-            # Try alternative model loading approaches
-            logger.info("=== Model Loading Attempt ===")
-            if 'qwen' in model_name:
-                logger.info("Attempting Qwen-specific loading")
-                try:
-                    # Try direct model loading
-                    result = FastLanguageModel.from_pretrained(
-                        model_name=base_model_config['model_name'],
-                        max_seq_length=training_config.model.max_seq_length,
-                        load_in_4bit=training_config.model.load_in_4bit,
-                        device_map='auto'
-                    )
-                    logger.info("Direct model loading successful")
-                except Exception as e:
-                    logger.error(f"Direct loading failed: {str(e)}")
-                    # Try alternative loading method
-                    try:
-                        from transformers import AutoModelForCausalLM, AutoTokenizer
-                        logger.info("Attempting alternative loading method")
-                        
-                        # Load tokenizer first
-                        tokenizer = AutoTokenizer.from_pretrained(
-                            base_model_config['model_name'],
-                            trust_remote_code=True
-                        )
-                        
-                        # Load model with minimal config
-                        model = AutoModelForCausalLM.from_pretrained(
-                            base_model_config['model_name'],
-                            trust_remote_code=True,
-                            device_map='auto',
-                            torch_dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
-                        )
-                        
-                        # Apply Unsloth optimization
-                        logger.info("Applying Unsloth optimization")
-                        model = FastLanguageModel.get_fast_model(model)
-                        result = (model, tokenizer)
-                        logger.info("Alternative loading successful")
-                    except Exception as e2:
-                        logger.error(f"Alternative loading failed: {str(e2)}")
-                        raise
-            else:
-                logger.error(f"Unsupported model type: {model_name}")
-                raise ValueError(f"Unsupported model type: {model_name}")
-            
-            # Process result
-            if result is None:
-                raise ValueError("Model initialization failed - explicit None check")
-            
-            if isinstance(result, tuple):
-                if len(result) != 2:
-                    raise ValueError(f"Expected (model, tokenizer) tuple, got tuple of length {len(result)}")
+            # Verify loaded model
+            if result is not None:
                 model, tokenizer = result
-                logger.info("Successfully unpacked model and tokenizer")
+                logger.info(f"Model loaded successfully. Type: {type(model)}")
+                logger.info(f"Model parameters: {sum(p.numel() for p in model.parameters())}")
+                logger.info(f"Model device: {next(model.parameters()).device}")
             else:
-                model = result
-                tokenizer = None
-                logger.info("Got model without tokenizer")
-            
-            # Verify model
-            logger.info(f"Model type: {type(model)}")
-            logger.info(f"Model config: {model.config if hasattr(model, 'config') else 'No config'}")
-            
+                raise ValueError("Model loading returned None")
+                
             return model, tokenizer
             
         except Exception as e:
