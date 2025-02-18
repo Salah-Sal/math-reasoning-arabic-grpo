@@ -7,19 +7,23 @@ logger = logging.getLogger(__name__)
 
 @pytest.fixture
 def reward_function():
+    logger.info("Creating new reward function instance for test")
     return ArabicXMLReward()
 
 def test_initialization():
     """Test reward function initialization."""
+    logger.info("Testing reward function initialization")
     reward = ArabicXMLReward()
     assert reward.config["tag_weights"]["thinking_start"] == 0.125
     assert reward.config["tag_weights"]["thinking_end"] == 0.125
     assert reward.config["tag_weights"]["answer_start"] == 0.125
     assert reward.config["tag_weights"]["answer_end"] == 0.125
     assert reward.config["penalties"]["extra_content"] == 0.001
+    logger.info("Initialization test completed successfully")
 
 def test_custom_config():
     """Test initialization with custom config."""
+    logger.info("Testing custom configuration")
     custom_config = {
         "tag_weights": {
             "thinking_start": 0.2
@@ -27,8 +31,8 @@ def test_custom_config():
     }
     reward = ArabicXMLReward(config=custom_config)
     assert reward.config["tag_weights"]["thinking_start"] == 0.2
-    # Other defaults should remain
     assert reward.config["tag_weights"]["thinking_end"] == 0.125
+    logger.info("Custom config test completed successfully")
 
 def test_perfect_format(reward_function):
     """Test reward calculation for perfect format."""
